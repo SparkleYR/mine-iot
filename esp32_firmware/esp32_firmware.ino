@@ -359,11 +359,18 @@ void loop() {
 
 void setupWiFi() {
   Serial.printf("[WIFI] Connecting to %s ...\n", ssid);
+  
+  // Clean up any existing connection state and force STA mode
+  WiFi.disconnect(true);
+  delay(200);
+  WiFi.mode(WIFI_STA);
+  delay(200);
+
   WiFi.setHostname("esp32-sensor-node-2");
   WiFi.begin(ssid, password);
 
   int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 10) {
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
     delay(500);
     Serial.print(".");
     attempts++;
