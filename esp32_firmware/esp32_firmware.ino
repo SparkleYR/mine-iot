@@ -14,7 +14,7 @@ const char* ssid           = "VIRUS";
 const char* password       = "abcdefgh";
 
 // MQTT
-const char* mqtt_server    = "10.48.78.8";
+const char* mqtt_server    = "10.42.0.1";
 const int   mqtt_port      = 1883;
 const char* mqtt_topic     = "esp32/sensor_data";
 const char* mqtt_client_id = "esp32_sensor_node_2";
