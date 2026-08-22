@@ -1,0 +1,14 @@
+[Unit]
+Description=Mine IoT PC Local Image Receiver
+After=network.target
+
+[Service]
+Type=simple
+User=sparkle
+WorkingDirectory=/home/sparkle/Documents/MINE SIH/mine-iot
+ExecStart=/usr/bin/python3 "/home/sparkle/Documents/MINE SIH/mine-iot/pc_image_receiver.py"
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
