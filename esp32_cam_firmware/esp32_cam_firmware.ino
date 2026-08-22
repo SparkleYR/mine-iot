@@ -3,24 +3,16 @@
 #include <WebServer.h>
 #include <HTTPClient.h>
 
-// Include ESP32 SOC registers to control Brownout Detector
-#include "soc/soc.h"
-#include "soc/rtc_cntl_reg.h"
-
 // =====================================================
 // WIFI & PI SERVER CONFIGURATION
 // =====================================================
 
 const char* ssid             = "Pi4B-Hotspot";
 const char* password         = "abcdefgh";
-const char* pi_upload_url    = "http://192.168.1.1:5000/upload";
+const char* pi_upload_url    = "http://10.42.0.1:5000/upload";
 
 // Auto capture interval in milliseconds (0 = disabled, 10000 = every 10 sec)
 const unsigned long AUTO_CAPTURE_INTERVAL = 10000;
-const unsigned long RECONNECT_INTERVAL    = 10000;
-
-// Enable flash LED during image capture
-const bool ENABLE_FLASH_ON_CAPTURE = true;
 
 // =====================================================
 // FLASH LED
@@ -57,29 +49,19 @@ const bool ENABLE_FLASH_ON_CAPTURE = true;
 
 WebServer server(80);
 unsigned long lastAutoCaptureTime = 0;
-unsigned long lastReconnectAttempt = 0;
-
-void setupWiFi();
 
 // =====================================================
 // UPLOAD IMAGE TO RASPBERRY PI
 // =====================================================
 
 bool send_image_to_pi(camera_fb_t *fb) {
-  if (!fb) {
-    Serial.println("[HTTP] Error: Empty frame buffer.");
-    return false;
-  }
-  
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("[HTTP] Cannot send image: Wi-Fi disconnected.");
+  if (!fb || WiFi.status() != WL_CONNECTED) {
+    Serial.println("[HTTP] Cannot send image: No Wi-Fi or empty frame buffer.");
     return false;
   }
 
-  WiFiClient client;
   HTTPClient http;
-
-  http.begin(client, pi_upload_url);
+  http.begin(pi_upload_url);
   http.addHeader("Content-Type", "image/jpeg");
   http.setTimeout(5000); // 5 sec timeout
 
@@ -89,7 +71,7 @@ bool send_image_to_pi(camera_fb_t *fb) {
   if (httpResponseCode > 0) {
     Serial.printf("[HTTP] Image uploaded successfully! Response code: %d\n", httpResponseCode);
   } else {
-    Serial.printf("[HTTP] Upload failed, error: %s\n", http.errorToString(httpResponseCode).c_str());
+    Serial.printf("[HTTP] Upload failed error: %s\n", http.errorToString(httpResponseCode).c_str());
   }
 
   http.end();
@@ -97,39 +79,25 @@ bool send_image_to_pi(camera_fb_t *fb) {
 }
 
 // =====================================================
-// SINGLE-GET CAMERA CAPTURE WITH FLASH
-// =====================================================
-
-camera_fb_t* capture_image(bool useFlash) {
-  if (useFlash) {
-    digitalWrite(FLASH_LED_PIN, HIGH);
-    delay(150); // Short flash pulse
-  }
-
-  // Get frame buffer EXACTLY ONCE
-  camera_fb_t *fb = esp_camera_fb_get();
-
-  if (useFlash) {
-    digitalWrite(FLASH_LED_PIN, LOW);
-  }
-
-  return fb;
-}
-
-// =====================================================
-// WEB CAPTURE HANDLER
+// CAPTURE IMAGE
 // =====================================================
 
 void handle_capture() {
-  camera_fb_t *fb = capture_image(ENABLE_FLASH_ON_CAPTURE);
+  // Turn flashlight ON briefly
+  digitalWrite(FLASH_LED_PIN, HIGH);
+  delay(100);
+
+  camera_fb_t *fb = esp_camera_fb_get();
+
+  // Turn flashlight OFF
+  digitalWrite(FLASH_LED_PIN, LOW);
 
   if (!fb) {
-    Serial.println("[ERROR] Camera capture failed!");
     server.send(500, "text/plain", "Camera capture failed");
     return;
   }
 
-  // Upload frame buffer to Pi Server (which proxies it to PC)
+  // Upload frame buffer to Pi Server in background
   send_image_to_pi(fb);
 
   // Send image to requesting HTTP client
@@ -179,7 +147,7 @@ button:hover { background: #0056b3; }
 </head>
 <body>
 <h1>ESP32-CAM Mine Monitoring</h1>
-<h3>Camera Feed & Auto-Upload to PC</h3>
+<h3>Camera Feed & Auto-Upload to Pi</h3>
 <img id="camera" src="/capture">
 <br>
 <button onclick="flashOn()">FLASH ON</button>
@@ -219,59 +187,21 @@ void handle_flash_off() {
 }
 
 // =====================================================
-// SETUP WIFI
-// =====================================================
-
-void setupWiFi() {
-  Serial.printf("Connecting to Wi-Fi %s ", ssid);
-  
-  // Clean disconnect with 802.11 Deauth frame
-  WiFi.disconnect(true);
-  delay(1000);
-  
-  WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false); // Disable Wi-Fi sleep for max stability
-  
-  // Reduce RF TX Power to 11dBm (reduces peak current draw from 500mA down to ~120mA)
-  WiFi.setTxPower(WIFI_POWER_11dBm);
-
-  WiFi.begin(ssid, password);
-
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-    delay(500);
-    Serial.print(".");
-    attempts++;
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println();
-    Serial.println("WiFi connected!");
-    Serial.print("ESP32-CAM IP Address: ");
-    Serial.println(WiFi.localIP());
-  } else {
-    Serial.println();
-    Serial.println("Wi-Fi connection attempt failed. Will retry in background.");
-  }
-}
-
-// =====================================================
 // SETUP
 // =====================================================
 
 void setup() {
-  // 1. DISABLE BROWNOUT DETECTOR to prevent chip resets during Wi-Fi transmission power bursts
-  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
-
   Serial.begin(115200);
   delay(1000);
 
   Serial.println();
   Serial.println("==============================");
-  Serial.println("ESP32-CAM STARTING (Brownout Disabled)");
+  Serial.println("ESP32-CAM STARTING");
   Serial.println("==============================");
 
+  // ---------------------------------------------------
   // FLASH LED
+  // ---------------------------------------------------
   pinMode(FLASH_LED_PIN, OUTPUT);
   digitalWrite(FLASH_LED_PIN, LOW);
 
@@ -303,7 +233,7 @@ void setup() {
 
   config.frame_size   = FRAMESIZE_VGA; // 640 x 480
   config.jpeg_quality = 12;
-  config.fb_count     = 1;
+  config.fb_count     = 2;
 
   // ---------------------------------------------------
   // INITIALIZE CAMERA
@@ -318,7 +248,23 @@ void setup() {
   // ---------------------------------------------------
   // CONNECT WIFI
   // ---------------------------------------------------
-  setupWiFi();
+  WiFi.disconnect(true);
+  delay(100);
+  WiFi.mode(WIFI_STA);
+  delay(100);
+
+  WiFi.begin(ssid, password);
+  Serial.printf("Connecting to Wi-Fi %s ", ssid);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println();
+  Serial.println("WiFi connected!");
+  Serial.print("ESP32-CAM IP Address: ");
+  Serial.println(WiFi.localIP());
 
   // ---------------------------------------------------
   // WEB SERVER ROUTES
@@ -338,29 +284,18 @@ void setup() {
 // =====================================================
 
 void loop() {
+  server.handleClient();
+
+  // Automatic periodic capture & upload to Pi
   unsigned long now = millis();
+  if (AUTO_CAPTURE_INTERVAL > 0 && (now - lastAutoCaptureTime >= AUTO_CAPTURE_INTERVAL)) {
+    lastAutoCaptureTime = now;
 
-  // Automatic Wi-Fi reconnection handling
-  if (WiFi.status() != WL_CONNECTED) {
-    if (now - lastReconnectAttempt >= RECONNECT_INTERVAL || lastReconnectAttempt == 0) {
-      lastReconnectAttempt = now;
-      setupWiFi();
-    }
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    server.handleClient();
-
-    // Automatic periodic capture & upload to Pi (proxied to PC)
-    if (AUTO_CAPTURE_INTERVAL > 0 && (now - lastAutoCaptureTime >= AUTO_CAPTURE_INTERVAL || lastAutoCaptureTime == 0)) {
-      lastAutoCaptureTime = now;
-
-      camera_fb_t *fb = capture_image(ENABLE_FLASH_ON_CAPTURE);
-      if (fb) {
-        Serial.println("[AUTO-CAPTURE] Image captured with flash. Sending to PC...");
-        send_image_to_pi(fb);
-        esp_camera_fb_return(fb);
-      }
+    camera_fb_t *fb = esp_camera_fb_get();
+    if (fb) {
+      Serial.println("[AUTO-CAPTURE] Capturing image and sending to Raspberry Pi...");
+      send_image_to_pi(fb);
+      esp_camera_fb_return(fb);
     }
   }
 }
