@@ -305,6 +305,20 @@ void setup() {
 // =====================================================
 
 void loop() {
+  // Auto-reconnect Wi-Fi if connection drops
+  if (WiFi.status() != WL_CONNECTED) {
+    static unsigned long lastReconnectAttempt = 0;
+    unsigned long nowMs = millis();
+    if (nowMs - lastReconnectAttempt > 5000) {
+      lastReconnectAttempt = nowMs;
+      Serial.printf("[WIFI] Connection lost! Reconnecting to %s...\n", ssid);
+      WiFi.disconnect();
+      WiFi.reconnect();
+    }
+    delay(10);
+    return;
+  }
+
   server.handleClient();
 
   // Automatic periodic capture & upload to Pi
@@ -317,6 +331,8 @@ void loop() {
       Serial.println("[AUTO-CAPTURE] Capturing image and sending to Raspberry Pi...");
       send_image_to_pi(fb);
       esp_camera_fb_return(fb);
+    } else {
+      Serial.println("[CAMERA] Capture failed: Frame buffer null.");
     }
   }
 }
