@@ -2,7 +2,7 @@
 import os
 import sys
 import datetime
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 # Local PC save directory
 SAVE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pi_receiver", "captured_images")
@@ -23,17 +23,17 @@ class PCImageReceiverHandler(BaseHTTPRequestHandler):
             # Ensure target directory exists on PC
             os.makedirs(SAVE_DIR, exist_ok=True)
 
-            # Generate timestamp filename: YYYYMMDD_HHMMSS_microseconds.jpg
+            # Generate timestamp filename: img_YYYYMMDD_HHMMSS_microseconds.jpg
             now = datetime.datetime.now()
             filename = f"img_{now.strftime('%Y%m%d_%H%M%S_%f')}.jpg"
             filepath = os.path.join(SAVE_DIR, filename)
 
-            # Write image to PC disk
+            # Write image to PC disk cleanly
             with open(filepath, "wb") as f:
                 f.write(image_data)
 
             log_entry = f"[{now.isoformat()}] SAVED ON PC: {filename} ({len(image_data)} bytes)"
-            print(log_entry)
+            print(log_entry, flush=True)
 
             self.send_response(200)
             self.send_header('Content-Type', 'text/plain')
@@ -43,25 +43,38 @@ class PCImageReceiverHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+    def do_GET(self):
+        if self.path == "/health":
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(b'{"ok": true, "service": "pc-image-receiver"}')
+        else:
+            self.send_response(404)
+            self.end_headers()
+
     def log_message(self, format, *args):
-        # Suppress standard HTTP request logs
+        # Suppress standard verbose HTTP request logs
         return
+
+class ReuseAddrThreadingHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = True
 
 def main():
     os.makedirs(SAVE_DIR, exist_ok=True)
     server_address = ('0.0.0.0', 5000)
-    httpd = HTTPServer(server_address, PCImageReceiverHandler)
-    print("==================================================")
-    print(" PC Image Receiver (Receiving via Pi Proxy)")
-    print("==================================================")
-    print("Listening on 0.0.0.0:5000 (Ethernet IP: 192.168.1.1)...")
-    print(f"Saving images directly to PC folder: {SAVE_DIR}")
-    print("==================================================")
+    httpd = ReuseAddrThreadingHTTPServer(server_address, PCImageReceiverHandler)
+    print("==================================================", flush=True)
+    print(" PC Image Receiver (ThreadingHTTPServer, Port 5000)", flush=True)
+    print("==================================================", flush=True)
+    print("Listening on 0.0.0.0:5000 (Ethernet IP: 192.168.1.1)...", flush=True)
+    print(f"Saving images directly to PC folder: {SAVE_DIR}", flush=True)
+    print("==================================================", flush=True)
     
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        print("\nStopping PC Image Receiver... Goodbye!")
+        print("\nStopping PC Image Receiver... Goodbye!", flush=True)
         httpd.server_close()
 
 if __name__ == "__main__":

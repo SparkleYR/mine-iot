@@ -61,13 +61,14 @@ echo ""
 echo -e "${BOLD}[2/4] Starting Local PC Daemons (Port 4000 & Port 5000)...${NC}"
 
 # Start PC Telemetry Receiver (Port 4000)
-if ss -tulpn | grep -q ":4000"; then
-    echo -e "  ${YELLOW}➜ Port 4000 (PC Telemetry Receiver) is already active.${NC}"
+if curl -s --max-time 2 http://localhost:4000/health | grep -q "pc-local-receiver"; then
+    echo -e "  ${GREEN}✔ Port 4000 (PC Telemetry Receiver) is active and healthy.${NC}"
 else
-    echo -e "  ${CYAN}➜ Launching PC Telemetry Receiver (pc_local_receiver.py)...${NC}"
+    echo -e "  ${CYAN}➜ Resetting/Launching PC Telemetry Receiver (pc_local_receiver.py)...${NC}"
+    fuser -k 4000/tcp &>/dev/null || true
     nohup python3 "${IOT_DIR}/pc_local_receiver.py" > "${WORKSPACE_DIR}/pc_local_receiver.log" 2>&1 &
     sleep 2
-    if ss -tulpn | grep -q ":4000"; then
+    if curl -s --max-time 2 http://localhost:4000/health | grep -q "pc-local-receiver"; then
         echo -e "  ${GREEN}✔ PC Telemetry Receiver active on 0.0.0.0:4000${NC}"
     else
         echo -e "  ${RED}✘ Failed to start PC Telemetry Receiver. Check ${WORKSPACE_DIR}/pc_local_receiver.log${NC}"
@@ -75,13 +76,14 @@ else
 fi
 
 # Start PC Image Receiver (Port 5000)
-if ss -tulpn | grep -q ":5000"; then
-    echo -e "  ${YELLOW}➜ Port 5000 (PC Image Binary Receiver) is already active.${NC}"
+if curl -s --max-time 2 http://localhost:5000/health | grep -q "pc-image-receiver"; then
+    echo -e "  ${GREEN}✔ Port 5000 (PC Image Binary Receiver) is active and healthy.${NC}"
 else
-    echo -e "  ${CYAN}➜ Launching PC Image Receiver (pc_image_receiver.py)...${NC}"
+    echo -e "  ${CYAN}➜ Resetting/Launching PC Image Receiver (pc_image_receiver.py)...${NC}"
+    fuser -k 5000/tcp &>/dev/null || true
     nohup python3 "${IOT_DIR}/pc_image_receiver.py" > "${WORKSPACE_DIR}/pc_image_receiver.log" 2>&1 &
     sleep 2
-    if ss -tulpn | grep -q ":5000"; then
+    if curl -s --max-time 2 http://localhost:5000/health | grep -q "pc-image-receiver"; then
         echo -e "  ${GREEN}✔ PC Image Binary Receiver active on 0.0.0.0:5000${NC}"
     else
         echo -e "  ${RED}✘ Failed to start PC Image Receiver. Check ${WORKSPACE_DIR}/pc_image_receiver.log${NC}"
