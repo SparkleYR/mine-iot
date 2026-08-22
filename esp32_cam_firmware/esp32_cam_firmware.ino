@@ -3,6 +3,10 @@
 #include <WebServer.h>
 #include <HTTPClient.h>
 
+// Include ESP32 SOC registers to control Brownout Detector
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
+
 // =====================================================
 // WIFI & PI SERVER CONFIGURATION
 // =====================================================
@@ -75,7 +79,6 @@ bool send_image_to_pi(camera_fb_t *fb) {
   WiFiClient client;
   HTTPClient http;
 
-  // Use explicitly initialized WiFiClient socket for cross-core compatibility
   http.begin(client, pi_upload_url);
   http.addHeader("Content-Type", "image/jpeg");
   http.setTimeout(5000); // 5 sec timeout
@@ -100,7 +103,7 @@ bool send_image_to_pi(camera_fb_t *fb) {
 camera_fb_t* capture_image(bool useFlash) {
   if (useFlash) {
     digitalWrite(FLASH_LED_PIN, HIGH);
-    delay(150); // Give sensor a moment under flash
+    delay(150); // Short flash pulse
   }
 
   // Get frame buffer EXACTLY ONCE
@@ -221,10 +224,16 @@ void handle_flash_off() {
 
 void setupWiFi() {
   Serial.printf("Connecting to Wi-Fi %s ", ssid);
+  
+  // Clean disconnect with 802.11 Deauth frame
   WiFi.disconnect(true);
-  delay(100);
+  delay(1000);
+  
   WiFi.mode(WIFI_STA);
-  delay(100);
+  WiFi.setSleep(false); // Disable Wi-Fi sleep for max stability
+  
+  // Reduce RF TX Power to 11dBm (reduces peak current draw from 500mA down to ~120mA)
+  WiFi.setTxPower(WIFI_POWER_11dBm);
 
   WiFi.begin(ssid, password);
 
@@ -251,12 +260,15 @@ void setupWiFi() {
 // =====================================================
 
 void setup() {
+  // 1. DISABLE BROWNOUT DETECTOR to prevent chip resets during Wi-Fi transmission power bursts
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+
   Serial.begin(115200);
   delay(1000);
 
   Serial.println();
   Serial.println("==============================");
-  Serial.println("ESP32-CAM STARTING");
+  Serial.println("ESP32-CAM STARTING (Brownout Disabled)");
   Serial.println("==============================");
 
   // FLASH LED
@@ -291,7 +303,7 @@ void setup() {
 
   config.frame_size   = FRAMESIZE_VGA; // 640 x 480
   config.jpeg_quality = 12;
-  config.fb_count     = 1; // Single buffer to ensure rock-solid get/return semantics
+  config.fb_count     = 1;
 
   // ---------------------------------------------------
   // INITIALIZE CAMERA
