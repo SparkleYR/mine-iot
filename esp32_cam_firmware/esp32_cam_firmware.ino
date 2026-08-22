@@ -79,18 +79,37 @@ bool send_image_to_pi(camera_fb_t *fb) {
 }
 
 // =====================================================
-// CAPTURE IMAGE
+// CAPTURE IMAGE WITH FLASH
+// =====================================================
+
+camera_fb_t* capture_with_flash() {
+  // 1. Turn Flash LED ON
+  digitalWrite(FLASH_LED_PIN, HIGH);
+
+  // 2. Delay 300ms to allow sensor AGC/AEC auto-exposure to adjust to flash
+  delay(300);
+
+  // 3. Flush old pre-flash frame buffer if present (due to fb_count = 2)
+  camera_fb_t *fb_stale = esp_camera_fb_get();
+  if (fb_stale) {
+    esp_camera_fb_return(fb_stale);
+  }
+
+  // 4. Capture fresh frame illuminated by flash
+  camera_fb_t *fb = esp_camera_fb_get();
+
+  // 5. Turn Flash LED OFF
+  digitalWrite(FLASH_LED_PIN, LOW);
+
+  return fb;
+}
+
+// =====================================================
+// WEB CAPTURE HANDLER
 // =====================================================
 
 void handle_capture() {
-  // Turn flashlight ON briefly
-  digitalWrite(FLASH_LED_PIN, HIGH);
-  delay(100);
-
-  camera_fb_t *fb = esp_camera_fb_get();
-
-  // Turn flashlight OFF
-  digitalWrite(FLASH_LED_PIN, LOW);
+  camera_fb_t *fb = capture_with_flash();
 
   if (!fb) {
     server.send(500, "text/plain", "Camera capture failed");
@@ -291,9 +310,9 @@ void loop() {
   if (AUTO_CAPTURE_INTERVAL > 0 && (now - lastAutoCaptureTime >= AUTO_CAPTURE_INTERVAL)) {
     lastAutoCaptureTime = now;
 
-    camera_fb_t *fb = esp_camera_fb_get();
+    Serial.println("[AUTO-CAPTURE] Turning on Flash & Capturing Image...");
+    camera_fb_t *fb = capture_with_flash();
     if (fb) {
-      Serial.println("[AUTO-CAPTURE] Capturing image and sending to Raspberry Pi...");
       send_image_to_pi(fb);
       esp_camera_fb_return(fb);
     }
