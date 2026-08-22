@@ -2,12 +2,14 @@
 import os
 import sys
 import datetime
+import urllib.request
+import urllib.error
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-# Directory where uploaded images will be saved
-SAVE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "captured_images")
+# PC IP and upload endpoint over ethernet
+PC_UPLOAD_URL = "http://192.168.1.1:5000/upload"
 
-class ImageUploadHandler(BaseHTTPRequestHandler):
+class ImageProxyHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path == "/upload":
             content_length = int(self.headers.get('Content-Length', 0))
@@ -17,51 +19,56 @@ class ImageUploadHandler(BaseHTTPRequestHandler):
                 self.wfile.write(b"Empty payload")
                 return
 
-            # Read JPEG image bytes
+            # Read JPEG image bytes directly into RAM (zero disk storage on Pi)
             image_data = self.rfile.read(content_length)
             
-            # Ensure target directory exists
-            os.makedirs(SAVE_DIR, exist_ok=True)
-
-            # Generate timestamp filename: YYYYMMDD_HHMMSS_microseconds.jpg
             now = datetime.datetime.now()
-            filename = f"img_{now.strftime('%Y%m%d_%H%M%S_%f')}.jpg"
-            filepath = os.path.join(SAVE_DIR, filename)
+            print(f"[{now.isoformat()}] Received {len(image_data)} bytes from ESP32-CAM. Forwarding to PC at {PC_UPLOAD_URL}...")
 
-            # Write image to disk
-            with open(filepath, "wb") as f:
-                f.write(image_data)
-
-            log_entry = f"[{now.isoformat()}] Saved: {filename} ({len(image_data)} bytes)"
-            print(log_entry)
-
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/plain')
-            self.end_headers()
-            self.wfile.write(f"Saved: {filename}".encode('utf-8'))
+            # Forward the JPEG bytes directly to PC via HTTP POST
+            try:
+                req = urllib.request.Request(
+                    PC_UPLOAD_URL,
+                    data=image_data,
+                    headers={'Content-Type': 'image/jpeg'},
+                    method='POST'
+                )
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    res_body = response.read().decode('utf-8')
+                    print(f"[{now.isoformat()}] Successfully forwarded to PC! Response: {res_body}")
+                    
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'text/plain')
+                    self.end_headers()
+                    self.wfile.write(f"Forwarded to PC: {res_body}".encode('utf-8'))
+            except urllib.error.URLError as e:
+                print(f"[{now.isoformat()}] ERROR: Failed to forward image to PC: {e}", file=sys.stderr)
+                self.send_response(502)
+                self.end_headers()
+                self.wfile.write(b"PC server unreachable")
         else:
             self.send_response(404)
             self.end_headers()
 
     def log_message(self, format, *args):
-        # Override to suppress standard HTTP access logs
+        # Suppress default HTTP access logs
         return
 
 def main():
-    os.makedirs(SAVE_DIR, exist_ok=True)
     server_address = ('', 5000)
-    httpd = HTTPServer(server_address, ImageUploadHandler)
+    httpd = HTTPServer(server_address, ImageProxyHandler)
     print("==================================================")
-    print(" ESP32-CAM Image Upload Receiver")
+    print(" Pi Image Proxy Server (ESP32-CAM -> Pi -> PC)")
     print("==================================================")
-    print(f"Listening on port 5000...")
-    print(f"Saving captured images to: {SAVE_DIR}")
+    print("Listening on port 5000...")
+    print(f"Target PC Forwarding URL: {PC_UPLOAD_URL}")
+    print("Note: Images are held ONLY in RAM and forwarded directly to PC.")
     print("==================================================")
     
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        print("\nStopping Image Server... Goodbye!")
+        print("\nStopping Pi Proxy Server... Goodbye!")
         httpd.server_close()
 
 if __name__ == "__main__":
