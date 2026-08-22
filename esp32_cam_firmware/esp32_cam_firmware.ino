@@ -1,5 +1,6 @@
 #include "esp_camera.h"
 #include <WiFi.h>
+#include <esp_wifi.h>
 #include <WebServer.h>
 #include <HTTPClient.h>
 
@@ -56,25 +57,31 @@ unsigned long lastAutoCaptureTime = 0;
 
 bool send_image_to_pi(camera_fb_t *fb) {
   if (!fb || WiFi.status() != WL_CONNECTED) {
-    Serial.println("[HTTP] Cannot send image: No Wi-Fi or empty frame buffer.");
+    Serial.println("[HTTP] Cannot send image: No Wi-Fi connection or empty frame buffer.");
     return false;
   }
 
   HTTPClient http;
+  
+  // Use http.begin with client or timeout
   http.begin(pi_upload_url);
   http.addHeader("Content-Type", "image/jpeg");
-  http.setTimeout(5000); // 5 sec timeout
+  http.addHeader("Connection", "close"); // Force connection close after upload to prevent socket hanging
+  http.setTimeout(10000); // 10 second timeout for reliable upload
 
   Serial.printf("[HTTP] Uploading %u bytes to %s ...\n", fb->len, pi_upload_url);
+  
+  unsigned long startMs = millis();
   int httpResponseCode = http.POST(fb->buf, fb->len);
+  unsigned long elapsedMs = millis() - startMs;
 
   if (httpResponseCode > 0) {
-    Serial.printf("[HTTP] Image uploaded successfully! Response code: %d\n", httpResponseCode);
+    Serial.printf("[HTTP] Uploaded successfully in %lu ms! Code: %d\n", elapsedMs, httpResponseCode);
   } else {
-    Serial.printf("[HTTP] Upload failed error: %s\n", http.errorToString(httpResponseCode).c_str());
+    Serial.printf("[HTTP] Upload failed (%lu ms) Error: %s\n", elapsedMs, http.errorToString(httpResponseCode).c_str());
   }
 
-  http.end();
+  http.end(); // Clean up TCP connection
   return (httpResponseCode == 200);
 }
 
@@ -85,7 +92,7 @@ bool send_image_to_pi(camera_fb_t *fb) {
 void handle_capture() {
   // Turn flashlight ON briefly
   digitalWrite(FLASH_LED_PIN, HIGH);
-  delay(100);
+  delay(50);
 
   camera_fb_t *fb = esp_camera_fb_get();
 
@@ -97,12 +104,12 @@ void handle_capture() {
     return;
   }
 
-  // Upload frame buffer to Pi Server in background
-  send_image_to_pi(fb);
-
-  // Send image to requesting HTTP client
+  // Send image directly to web browser
   server.sendHeader("Content-Disposition", "inline; filename=capture.jpg");
   server.send_P(200, "image/jpeg", (const char *)fb->buf, fb->len);
+
+  // Also upload to Raspberry Pi
+  send_image_to_pi(fb);
 
   esp_camera_fb_return(fb);
 }
@@ -160,10 +167,10 @@ function triggerCapture() {
   document.getElementById("camera").src = "/capture?t=" + new Date().getTime();
 }
 
-// Refresh image every 5 seconds
+// Refresh live preview every 10 seconds to reduce socket contention
 setInterval(function() {
   triggerCapture();
-}, 5000);
+}, 10000);
 </script>
 </body>
 </html>
@@ -231,9 +238,17 @@ void setup() {
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
 
-  config.frame_size   = FRAMESIZE_VGA; // 640 x 480
-  config.jpeg_quality = 12;
-  config.fb_count     = 2;
+  if (psramFound()) {
+    config.frame_size   = FRAMESIZE_VGA; // 640x480
+    config.jpeg_quality = 10;
+    config.fb_count     = 2;
+    config.grab_mode    = CAMERA_GRAB_LATEST;
+  } else {
+    config.frame_size   = FRAMESIZE_QVGA; // 320x240 fallback without PSRAM
+    config.jpeg_quality = 12;
+    config.fb_count     = 1;
+    config.grab_mode    = CAMERA_GRAB_WHEN_EMPTY;
+  }
 
   // ---------------------------------------------------
   // INITIALIZE CAMERA
@@ -265,6 +280,12 @@ void setup() {
   Serial.println("WiFi connected!");
   Serial.print("ESP32-CAM IP Address: ");
   Serial.println(WiFi.localIP());
+
+  // CRITICAL FIX FOR TIMEOUTS: Disable Wi-Fi modem power saving mode
+  // ESP32 default Wi-Fi sleep causes HTTP POST latency & timeouts when transmitting frame buffers
+  WiFi.setSleep(false);
+  esp_wifi_set_ps(WIFI_PS_NONE);
+  Serial.println("[WIFI] Power save mode DISABLED for maximum HTTP throughput.");
 
   // ---------------------------------------------------
   // WEB SERVER ROUTES
@@ -299,3 +320,4 @@ void loop() {
     }
   }
 }
+
