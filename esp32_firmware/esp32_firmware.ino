@@ -248,6 +248,7 @@ void setup() {
   // Wi-Fi & MQTT
   setupWiFi();
   mqttClient.setServer(mqtt_server, mqtt_port);
+  mqttClient.setBufferSize(1024);
 
   Serial.println();
   Serial.println("System initialized. Starting measurement loop...");
