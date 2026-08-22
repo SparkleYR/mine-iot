@@ -8,235 +8,635 @@
 // ==========================================
 // CONFIGURATION
 // ==========================================
-const char* ssid          = "VIRUS";
-const char* password      = "abcdefgh";
-const char* mqtt_server   = "10.48.78.8";     // IP Address of Raspberry Pi 4B on VIRUS Wi-Fi
-const int mqtt_port       = 1883;            // Default Mosquitto MQTT port
-const char* mqtt_topic    = "esp32/sensor_data";
-const char* mqtt_client_id = "esp32_sensor_node";
 
-// Pins
-const int SW420_PIN = 13; // SW-420 digital out pin
+// Wi-Fi
+const char* ssid           = "VIRUS";
+const char* password       = "abcdefgh";
 
-// Sampling intervals (in milliseconds)
-const unsigned long SENSOR_INTERVAL = 5000;    // Read sensor every 5 seconds
-const unsigned long RECONNECT_INTERVAL = 10000; // Retry connection every 10 seconds
+// MQTT
+const char* mqtt_server    = "10.48.78.8";
+const int   mqtt_port      = 1883;
+const char* mqtt_topic     = "esp32/sensor_data";
+const char* mqtt_client_id = "esp32_sensor_node_2";
 
 // ==========================================
-// DATA STRUCTURES & BUFFERING
+// PIN CONFIGURATION
 // ==========================================
+
+// SW-420 vibration sensor
+const int SW420_PIN = 13;
+
+// HC-SR04
+const int HCSR04_TRIG_PIN = 25;
+const int HCSR04_ECHO_PIN = 26;
+
+// I2C
+const int SDA_PIN = 21;
+const int SCL_PIN = 22;
+
+// ==========================================
+// SENSOR I2C ADDRESSES
+// ==========================================
+
+// Standalone MPU6050
+const uint8_t MPU1_ADDRESS = 0x68;
+
+// MPU6050 inside GY-87
+const uint8_t MPU2_ADDRESS = 0x69;
+
+// ==========================================
+// SAMPLING / RECONNECT INTERVALS
+// ==========================================
+
+const unsigned long SENSOR_INTERVAL = 5000;
+const unsigned long RECONNECT_INTERVAL = 10000;
+
+// ==========================================
+// DATA STRUCTURE
+// ==========================================
+
 struct DataPoint {
   uint32_t seq;
   uint32_t timestamp_ms;
+
+  // SW-420
   int vibration;
-  float ax, ay, az;
-  float gx, gy, gz;
+
+  // MPU6050 #1
+  float ax1;
+  float ay1;
+  float az1;
+  float gx1;
+  float gy1;
+  float gz1;
+
+  // MPU6050 #2 / GY-87
+  float ax2;
+  float ay2;
+  float az2;
+  float gx2;
+  float gy2;
+  float gz2;
+
+  // HC-SR04
+  float distance_cm;
 };
 
-// RAM-based circular buffer
-const size_t MAX_BUFFER_SIZE = 1000; // Limit buffer to avoid Out-Of-Memory (OOM)
+// ==========================================
+// BUFFER
+// ==========================================
+
+const size_t MAX_BUFFER_SIZE = 1000;
 std::vector<DataPoint> dataBuffer;
 uint32_t sequenceNumber = 0;
 
-// Network Clients
+// ==========================================
+// NETWORK CLIENTS
+// ==========================================
+
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
-Adafruit_MPU6050 mpu;
 
-// State flags
-bool mpu_initialized = false;
-volatile bool vibrationTriggered = false; // Latch for vibration interrupt
+// ==========================================
+// MPU6050 OBJECTS
+// ==========================================
 
-// Timing variables
+Adafruit_MPU6050 mpu1;
+Adafruit_MPU6050 mpu2;
+
+// ==========================================
+// STATE FLAGS
+// ==========================================
+
+bool mpu1_initialized = false;
+bool mpu2_initialized = false;
+volatile bool vibrationTriggered = false;
+
+// ==========================================
+// TIMING
+// ==========================================
+
 unsigned long lastSensorReadTime = 0;
 unsigned long lastReconnectAttempt = 0;
 
 // ==========================================
-// INTERRUPT SERVICE ROUTINES
+// FUNCTION DECLARATIONS
 // ==========================================
+
+void setupWiFi();
+void connectToMQTT();
+
+void readSensors(
+  int &vib,
+
+  float &ax1,
+  float &ay1,
+  float &az1,
+  float &gx1,
+  float &gy1,
+  float &gz1,
+
+  float &ax2,
+  float &ay2,
+  float &az2,
+  float &gx2,
+  float &gy2,
+  float &gz2,
+
+  float &distance
+);
+
+float readDistance();
+bool publishDataPoint(const DataPoint &dp);
+void processQueue();
+
+// ==========================================
+// INTERRUPT
+// ==========================================
+
 void IRAM_ATTR handleVibrationInterrupt() {
   vibrationTriggered = true;
 }
 
 // ==========================================
-// FUNCTION DECLARATIONS
+// SETUP
 // ==========================================
-void setupWiFi();
-void connectToMQTT();
-void readSensors(int &vib, float &ax, float &ay, float &az, float &gx, float &gy, float &gz);
-bool publishDataPoint(const DataPoint &dp);
-void processQueue();
 
-// ==========================================
-// SETUP & LOOP
-// ==========================================
 void setup() {
   Serial.begin(115200);
   delay(1000);
-  Serial.println("\n--- ESP32 Reliable Data Client (MPU6050 & SW-420) Starting ---");
 
-  // 1. Initialize SW-420 Sensor with Interrupt
+  Serial.println();
+  Serial.println("------------------------------------------");
+  Serial.println(" ESP32 Sensor Node Starting");
+  Serial.println("------------------------------------------");
+
+  // ----------------------------------------
+  // 1. SW-420
+  // ----------------------------------------
+
   pinMode(SW420_PIN, INPUT);
-  attachInterrupt(digitalPinToInterrupt(SW420_PIN), handleVibrationInterrupt, RISING);
-  Serial.printf("SW-420 Interrupt attached to GPIO %d\n", SW420_PIN);
 
-  // 2. Initialize MPU6050 I2C Sensor
-  Wire.begin(21, 22); // Default SDA/SCL pins
-  if (!mpu.begin()) {
-    Serial.println("[ERROR] Failed to find MPU6050 chip! Check connection/wiring. Will report 0.0.");
+  attachInterrupt(
+    digitalPinToInterrupt(SW420_PIN),
+    handleVibrationInterrupt,
+    RISING
+  );
+
+  Serial.printf(
+    "[SW420] Interrupt attached to GPIO %d\n",
+    SW420_PIN
+  );
+
+  // ----------------------------------------
+  // 2. HC-SR04
+  // ----------------------------------------
+
+  pinMode(HCSR04_TRIG_PIN, OUTPUT);
+  pinMode(HCSR04_ECHO_PIN, INPUT);
+  digitalWrite(HCSR04_TRIG_PIN, LOW);
+
+  Serial.printf(
+    "[HCSR04] TRIG = GPIO %d, ECHO = GPIO %d\n",
+    HCSR04_TRIG_PIN,
+    HCSR04_ECHO_PIN
+  );
+
+  // ----------------------------------------
+  // 3. I2C
+  // ----------------------------------------
+
+  Wire.begin(SDA_PIN, SCL_PIN);
+  Wire.setClock(400000);
+
+  Serial.printf(
+    "[I2C] SDA = GPIO %d, SCL = GPIO %d\n",
+    SDA_PIN,
+    SCL_PIN
+  );
+
+  // ----------------------------------------
+  // 4. MPU6050 #1
+  // Address = 0x68
+  // ----------------------------------------
+
+  if (!mpu1.begin(MPU1_ADDRESS)) {
+    Serial.println(
+      "[ERROR] MPU6050 #1 at 0x68 not found!"
+    );
+    mpu1_initialized = false;
   } else {
-    Serial.println("[SUCCESS] MPU6050 initialized.");
-    mpu_initialized = true;
-    
-    // Set sensor ranges & bandwidth
-    mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
-    mpu.setGyroRange(MPU6050_RANGE_500_DEG);
-    mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
+    Serial.println(
+      "[SUCCESS] MPU6050 #1 initialized at 0x68"
+    );
+    mpu1_initialized = true;
+    mpu1.setAccelerometerRange(MPU6050_RANGE_8_G);
+    mpu1.setGyroRange(MPU6050_RANGE_500_DEG);
+    mpu1.setFilterBandwidth(MPU6050_BAND_21_HZ);
   }
 
-  // 3. Connect to networks
+  // ----------------------------------------
+  // 5. MPU6050 #2 inside GY-87
+  // Address = 0x69
+  // ----------------------------------------
+
+  if (!mpu2.begin(MPU2_ADDRESS)) {
+    Serial.println(
+      "[ERROR] GY-87 MPU6050 at 0x69 not found!"
+    );
+    mpu2_initialized = false;
+  } else {
+    Serial.println(
+      "[SUCCESS] GY-87 MPU6050 initialized at 0x69"
+    );
+    mpu2_initialized = true;
+    mpu2.setAccelerometerRange(MPU6050_RANGE_8_G);
+    mpu2.setGyroRange(MPU6050_RANGE_500_DEG);
+    mpu2.setFilterBandwidth(MPU6050_BAND_21_HZ);
+  }
+
+  // ----------------------------------------
+  // 6. Wi-Fi
+  // ----------------------------------------
+
   setupWiFi();
-  mqttClient.setServer(mqtt_server, mqtt_port);
-  
-  Serial.println("System initialized. Starting measurement loop.");
+
+  // ----------------------------------------
+  // 7. MQTT
+  // ----------------------------------------
+
+  mqttClient.setServer(
+    mqtt_server,
+    mqtt_port
+  );
+
+  Serial.println();
+  Serial.println(
+    "System initialized. Starting measurement loop."
+  );
 }
+
+// ==========================================
+// MAIN LOOP
+// ==========================================
 
 void loop() {
   unsigned long now = millis();
 
-  // 1. Read sensor and queue data at fixed intervals
-  if (now - lastSensorReadTime >= SENSOR_INTERVAL || lastSensorReadTime == 0) {
-    lastSensorReadTime = now;
-    
-    int vib = 0;
-    float ax = 0.0, ay = 0.0, az = 0.0;
-    float gx = 0.0, gy = 0.0, gz = 0.0;
-    
-    readSensors(vib, ax, ay, az, gx, gy, gz);
-    
-    sequenceNumber++;
-    DataPoint dp = { sequenceNumber, now, vib, ax, ay, az, gx, gy, gz };
+  // ----------------------------------------
+  // 1. SENSOR SAMPLING
+  // ----------------------------------------
 
-    // Prevent buffer overflow (FIFO style)
+  if (
+    now - lastSensorReadTime >= SENSOR_INTERVAL ||
+    lastSensorReadTime == 0
+  ) {
+    lastSensorReadTime = now;
+
+    int vib = 0;
+
+    // MPU #1
+    float ax1 = 0.0;
+    float ay1 = 0.0;
+    float az1 = 0.0;
+    float gx1 = 0.0;
+    float gy1 = 0.0;
+    float gz1 = 0.0;
+
+    // MPU #2
+    float ax2 = 0.0;
+    float ay2 = 0.0;
+    float az2 = 0.0;
+    float gx2 = 0.0;
+    float gy2 = 0.0;
+    float gz2 = 0.0;
+
+    // Distance
+    float distance = -1.0;
+
+    // Read everything
+    readSensors(
+      vib,
+      ax1, ay1, az1, gx1, gy1, gz1,
+      ax2, ay2, az2, gx2, gy2, gz2,
+      distance
+    );
+
+    // Create data point
+    sequenceNumber++;
+    DataPoint dp = {
+      sequenceNumber,
+      now,
+      vib,
+      ax1, ay1, az1, gx1, gy1, gz1,
+      ax2, ay2, az2, gx2, gy2, gz2,
+      distance
+    };
+
+    // Buffer management
     if (dataBuffer.size() >= MAX_BUFFER_SIZE) {
-      Serial.println("[WARNING] Buffer full! Dropping oldest data point.");
+      Serial.println(
+        "[WARNING] Buffer full! Dropping oldest data point."
+      );
       dataBuffer.erase(dataBuffer.begin());
     }
-    
     dataBuffer.push_back(dp);
-    Serial.printf("[SENSOR] Read #%u: Vib=%d, Accel=[%.2f,%.2f,%.2f], Gyro=[%.2f,%.2f,%.2f]. Buffer size: %d/%d\n", 
-                  dp.seq, dp.vibration, dp.ax, dp.ay, dp.az, dp.gx, dp.gy, dp.gz, dataBuffer.size(), MAX_BUFFER_SIZE);
+
+    // Serial output
+    Serial.printf(
+      "[SENSOR] #%lu | "
+      "Vib=%d | "
+      "MPU1 A=[%.2f, %.2f, %.2f] "
+      "G=[%.2f, %.2f, %.2f] | "
+      "MPU2 A=[%.2f, %.2f, %.2f] "
+      "G=[%.2f, %.2f, %.2f] | "
+      "Dist=%.2f cm | "
+      "Buffer=%d/%d\n",
+      (unsigned long)dp.seq,
+      dp.vibration,
+      dp.ax1, dp.ay1, dp.az1, dp.gx1, dp.gy1, dp.gz1,
+      dp.ax2, dp.ay2, dp.az2, dp.gx2, dp.gy2, dp.gz2,
+      dp.distance_cm,
+      (int)dataBuffer.size(),
+      (int)MAX_BUFFER_SIZE
+    );
   }
 
-  // 2. Manage Wi-Fi and MQTT connection non-blockingly
+  // ----------------------------------------
+  // 2. NETWORK MANAGEMENT
+  // ----------------------------------------
+
   if (WiFi.status() != WL_CONNECTED) {
-    if (now - lastReconnectAttempt >= RECONNECT_INTERVAL) {
+    if (
+      now - lastReconnectAttempt >=
+      RECONNECT_INTERVAL
+    ) {
       lastReconnectAttempt = now;
       setupWiFi();
     }
   } else if (!mqttClient.connected()) {
-    if (now - lastReconnectAttempt >= RECONNECT_INTERVAL) {
+    if (
+      now - lastReconnectAttempt >=
+      RECONNECT_INTERVAL
+    ) {
       lastReconnectAttempt = now;
       connectToMQTT();
     }
   }
 
-  // 3. Process the queue if online
-  if (WiFi.status() == WL_CONNECTED && mqttClient.connected()) {
+  // ----------------------------------------
+  // 3. MQTT QUEUE PROCESSING
+  // ----------------------------------------
+
+  if (
+    WiFi.status() == WL_CONNECTED &&
+    mqttClient.connected()
+  ) {
     mqttClient.loop();
     processQueue();
   }
 }
 
 // ==========================================
-// NETWORK & MQTT FUNCTIONS
+// WIFI
 // ==========================================
+
 void setupWiFi() {
-  Serial.printf("[WIFI] Connecting to %s ...\n", ssid);
-  WiFi.setHostname("esp32-sensor-node");
-  WiFi.begin(ssid, password);
-  
+  Serial.printf(
+    "[WIFI] Connecting to %s ...\n",
+    ssid
+  );
+
+  WiFi.setHostname(
+    "esp32-sensor-node-2"
+  );
+
+  WiFi.begin(
+    ssid,
+    password
+  );
+
   int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 10) {
+  while (
+    WiFi.status() != WL_CONNECTED &&
+    attempts < 10
+  ) {
     delay(500);
     Serial.print(".");
     attempts++;
   }
-  
+
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\n[WIFI] Connected! IP Address: " + WiFi.localIP().toString());
+    Serial.println();
+    Serial.print(
+      "[WIFI] Connected! IP Address: "
+    );
+    Serial.println(
+      WiFi.localIP()
+    );
   } else {
-    Serial.println("\n[WIFI] Connection failed. Will retry in background.");
+    Serial.println();
+    Serial.println(
+      "[WIFI] Connection failed. "
+      "Will retry in background."
+    );
   }
 }
+
+// ==========================================
+// MQTT
+// ==========================================
 
 void connectToMQTT() {
-  Serial.print("[MQTT] Connecting to broker... ");
-  if (mqttClient.connect(mqtt_client_id)) {
-    Serial.println("Connected!");
+  Serial.print(
+    "[MQTT] Connecting to broker... "
+  );
+
+  if (
+    mqttClient.connect(
+      mqtt_client_id
+    )
+  ) {
+    Serial.println(
+      "Connected!"
+    );
   } else {
-    Serial.printf("Failed, rc=%d. Will retry in background.\n", mqttClient.state());
+    Serial.printf(
+      "Failed, rc=%d. "
+      "Will retry in background.\n",
+      mqttClient.state()
+    );
   }
 }
 
 // ==========================================
-// CORE DATA PROCESSING & SENDING
+// SENSOR READING
 // ==========================================
-void readSensors(int &vib, float &ax, float &ay, float &az, float &gx, float &gy, float &gz) {
-  // Read SW-420 vibration sensor state (check latch)
+
+void readSensors(
+  int &vib,
+  float &ax1, float &ay1, float &az1, float &gx1, float &gy1, float &gz1,
+  float &ax2, float &ay2, float &az2, float &gx2, float &gy2, float &gz2,
+  float &distance
+) {
+  // SW-420
   if (vibrationTriggered) {
     vib = 1;
-    vibrationTriggered = false; // Reset latch
+    vibrationTriggered = false;
   } else {
     vib = 0;
   }
 
-  // Read MPU6050
-  if (mpu_initialized) {
-    sensors_event_t a, g, temp;
-    if (mpu.getEvent(&a, &g, &temp)) {
-      ax = a.acceleration.x;
-      ay = a.acceleration.y;
-      az = a.acceleration.z;
-      gx = g.gyro.x;
-      gy = g.gyro.y;
-      gz = g.gyro.z;
+  // MPU6050 #1
+  if (mpu1_initialized) {
+    sensors_event_t a1;
+    sensors_event_t g1;
+    sensors_event_t temp1;
+
+    if (mpu1.getEvent(&a1, &g1, &temp1)) {
+      ax1 = a1.acceleration.x;
+      ay1 = a1.acceleration.y;
+      az1 = a1.acceleration.z;
+      gx1 = g1.gyro.x;
+      gy1 = g1.gyro.y;
+      gz1 = g1.gyro.z;
     } else {
-      Serial.println("[ERROR] Failed to get MPU6050 event reading.");
+      Serial.println(
+        "[ERROR] Failed to read MPU6050 #1."
+      );
     }
   } else {
-    // If not initialized, try to reinitialize
-    if (mpu.begin()) {
-      Serial.println("[SUCCESS] MPU6050 re-initialized successfully.");
-      mpu_initialized = true;
+    if (mpu1.begin(MPU1_ADDRESS)) {
+      Serial.println(
+        "[SUCCESS] MPU6050 #1 reinitialized."
+      );
+      mpu1_initialized = true;
     }
   }
+
+  // MPU6050 #2 / GY-87
+  if (mpu2_initialized) {
+    sensors_event_t a2;
+    sensors_event_t g2;
+    sensors_event_t temp2;
+
+    if (mpu2.getEvent(&a2, &g2, &temp2)) {
+      ax2 = a2.acceleration.x;
+      ay2 = a2.acceleration.y;
+      az2 = a2.acceleration.z;
+      gx2 = g2.gyro.x;
+      gy2 = g2.gyro.y;
+      gz2 = g2.gyro.z;
+    } else {
+      Serial.println(
+        "[ERROR] Failed to read GY-87 MPU6050."
+      );
+    }
+  } else {
+    if (mpu2.begin(MPU2_ADDRESS)) {
+      Serial.println(
+        "[SUCCESS] GY-87 MPU6050 reinitialized."
+      );
+      mpu2_initialized = true;
+    }
+  }
+
+  // HC-SR04
+  distance = readDistance();
 }
 
+// ==========================================
+// HC-SR04 DISTANCE
+// ==========================================
+
+float readDistance() {
+  digitalWrite(HCSR04_TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(HCSR04_TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(HCSR04_TRIG_PIN, LOW);
+
+  unsigned long duration = pulseIn(
+    HCSR04_ECHO_PIN,
+    HIGH,
+    30000
+  );
+
+  if (duration == 0) {
+    return -1.0;
+  }
+
+  float distance = (duration * 0.0343) / 2.0;
+  return distance;
+}
+
+// ==========================================
+// MQTT DATA PUBLISH
+// ==========================================
+
 bool publishDataPoint(const DataPoint &dp) {
-  // Construct JSON payload with device identifier
-  char payload[256];
-  snprintf(payload, sizeof(payload), 
-           "{\"dev\":\"%s\",\"seq\":%u,\"ms\":%u,\"vib\":%d,\"ax\":%.3f,\"ay\":%.3f,\"az\":%.3f,\"gx\":%.3f,\"gy\":%.3f,\"gz\":%.3f}", 
-           mqtt_client_id, dp.seq, dp.timestamp_ms, dp.vibration, dp.ax, dp.ay, dp.az, dp.gx, dp.gy, dp.gz);
+  char payload[600];
+
+  snprintf(
+    payload,
+    sizeof(payload),
+    "{"
+      "\"dev\":\"%s\","
+      "\"seq\":%lu,"
+      "\"ms\":%lu,"
+      "\"vib\":%d,"
+      "\"mpu1\":{"
+        "\"ax\":%.3f,"
+        "\"ay\":%.3f,"
+        "\"az\":%.3f,"
+        "\"gx\":%.3f,"
+        "\"gy\":%.3f,"
+        "\"gz\":%.3f"
+      "},"
+      "\"mpu2\":{"
+        "\"ax\":%.3f,"
+        "\"ay\":%.3f,"
+        "\"az\":%.3f,"
+        "\"gx\":%.3f,"
+        "\"gy\":%.3f,"
+        "\"gz\":%.3f"
+      "},"
+      "\"distance_cm\":%.2f"
+    "}",
+    mqtt_client_id,
+    (unsigned long)dp.seq,
+    (unsigned long)dp.timestamp_ms,
+    dp.vibration,
+    dp.ax1, dp.ay1, dp.az1, dp.gx1, dp.gy1, dp.gz1,
+    dp.ax2, dp.ay2, dp.az2, dp.gx2, dp.gy2, dp.gz2,
+    dp.distance_cm
+  );
 
   return mqttClient.publish(mqtt_topic, payload);
 }
 
+// ==========================================
+// QUEUE PROCESSING
+// ==========================================
+
 void processQueue() {
   while (!dataBuffer.empty()) {
     const DataPoint &dp = dataBuffer.front();
-    
-    Serial.printf("[QUEUE] Attempting to publish #%u (buffered)... ", dp.seq);
-    
+
+    Serial.printf(
+      "[QUEUE] Attempting to publish #%lu ... ",
+      (unsigned long)dp.seq
+    );
+
     if (publishDataPoint(dp)) {
       Serial.println("Success!");
       dataBuffer.erase(dataBuffer.begin());
     } else {
-      Serial.println("Failed. Stopping queue processing.");
-      break; 
+      Serial.println(
+        "Failed. Stopping queue processing."
+      );
+      break;
     }
-    
     delay(10);
   }
 }

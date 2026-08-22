@@ -12,7 +12,7 @@ MQTT_PORT = 1883
 MQTT_TOPIC = "esp32/sensor_data"
 
 def main():
-    print("--- Starting Mock ESP32 Publisher (Vibration & Motion) ---")
+    print("--- Starting Mock ESP32 Publisher (Vibration, Motion & Distance) ---")
     
     # Create MQTT client instance with compatibility for Paho 2.x
     try:
@@ -39,24 +39,38 @@ def main():
             seq += 1
             device_ms = int(time.time() * 1000) - start_time
             vib = random.choice([0, 0, 0, 1])  # Occasional vibration
-            ax = round(random.uniform(-0.5, 0.5), 3)
-            ay = round(random.uniform(-0.5, 0.5), 3)
-            az = round(9.8 + random.uniform(-0.2, 0.2), 3) # Gravity on Z
-            gx = round(random.uniform(-0.1, 0.1), 3)
-            gy = round(random.uniform(-0.1, 0.1), 3)
-            gz = round(random.uniform(-0.1, 0.1), 3)
+            dist = round(10.0 + random.uniform(0, 150), 2) # HC-SR04 distance
+            
+            # MPU1
+            ax1 = round(random.uniform(-0.5, 0.5), 3)
+            ay1 = round(random.uniform(-0.5, 0.5), 3)
+            az1 = round(9.8 + random.uniform(-0.2, 0.2), 3)
+            gx1 = round(random.uniform(-0.1, 0.1), 3)
+            gy1 = round(random.uniform(-0.1, 0.1), 3)
+            gz1 = round(random.uniform(-0.1, 0.1), 3)
+            
+            # MPU2
+            ax2 = round(9.8 + random.uniform(-0.2, 0.2), 3) # Placed vertically
+            ay2 = round(random.uniform(-0.5, 0.5), 3)
+            az2 = round(random.uniform(-0.5, 0.5), 3)
+            gx2 = round(random.uniform(-0.1, 0.1), 3)
+            gy2 = round(random.uniform(-0.1, 0.1), 3)
+            gz2 = round(random.uniform(-0.1, 0.1), 3)
             
             payload = {
                 "dev": "mock_esp32_1",
                 "seq": seq,
                 "ms": device_ms,
                 "vib": vib,
-                "ax": ax,
-                "ay": ay,
-                "az": az,
-                "gx": gx,
-                "gy": gy,
-                "gz": gz
+                "mpu1": {
+                    "ax": ax1, "ay": ay1, "az": az1,
+                    "gx": gx1, "gy": gy1, "gz": gz1
+                },
+                "mpu2": {
+                    "ax": ax2, "ay": ay2, "az": az2,
+                    "gx": gx2, "gy": gy2, "gz": gz2
+                },
+                "distance_cm": dist
             }
             client.publish(MQTT_TOPIC, json.dumps(payload))
             print(f"Published: {payload}")
@@ -69,25 +83,39 @@ def main():
         for _ in range(3):
             seq += 1
             device_ms = int(time.time() * 1000) - start_time
-            vib = random.choice([0, 1])  # More frequent vibration during event
-            ax = round(random.uniform(-1.5, 1.5), 3)
-            ay = round(random.uniform(-1.5, 1.5), 3)
-            az = round(9.8 + random.uniform(-1.0, 1.0), 3)
-            gx = round(random.uniform(-0.5, 0.5), 3)
-            gy = round(random.uniform(-0.5, 0.5), 3)
-            gz = round(random.uniform(-0.5, 0.5), 3)
+            vib = random.choice([0, 1])
+            dist = round(10.0 + random.uniform(0, 150), 2)
+            
+            # MPU1
+            ax1 = round(random.uniform(-1.5, 1.5), 3)
+            ay1 = round(random.uniform(-1.5, 1.5), 3)
+            az1 = round(9.8 + random.uniform(-1.0, 1.0), 3)
+            gx1 = round(random.uniform(-0.5, 0.5), 3)
+            gy1 = round(random.uniform(-0.5, 0.5), 3)
+            gz1 = round(random.uniform(-0.5, 0.5), 3)
+            
+            # MPU2
+            ax2 = round(9.8 + random.uniform(-1.0, 1.0), 3)
+            ay2 = round(random.uniform(-1.5, 1.5), 3)
+            az2 = round(random.uniform(-1.5, 1.5), 3)
+            gx2 = round(random.uniform(-0.5, 0.5), 3)
+            gy2 = round(random.uniform(-0.5, 0.5), 3)
+            gz2 = round(random.uniform(-0.5, 0.5), 3)
             
             buffered_payloads.append({
                 "dev": "mock_esp32_1",
                 "seq": seq,
                 "ms": device_ms,
                 "vib": vib,
-                "ax": ax,
-                "ay": ay,
-                "az": az,
-                "gx": gx,
-                "gy": gy,
-                "gz": gz
+                "mpu1": {
+                    "ax": ax1, "ay": ay1, "az": az1,
+                    "gx": gx1, "gy": gy1, "gz": gz1
+                },
+                "mpu2": {
+                    "ax": ax2, "ay": ay2, "az": az2,
+                    "gx": gx2, "gy": gy2, "gz": gz2
+                },
+                "distance_cm": dist
             })
             time.sleep(1)
 

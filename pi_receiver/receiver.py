@@ -27,15 +27,15 @@ def init_db():
     cursor.execute("PRAGMA table_info(sensor_readings)")
     columns = [col[1] for col in cursor.fetchall()]
     
-    # Migrate if table has old schema (lacks device_id column)
-    if columns and "device_id" not in columns:
-        print("[MIGRATION] Schema mismatch detected (lacks device_id). Dropping old table.")
+    # Migrate if table has old schema (lacks distance_cm column)
+    if columns and "distance_cm" not in columns:
+        print("[MIGRATION] Schema mismatch detected (lacks distance_cm). Dropping old table.")
         cursor.execute("DROP TABLE sensor_readings")
         conn.commit()
         columns = []
         
     if not columns:
-        print("Creating new sensor_readings table with multi-node support.")
+        print("Creating new sensor_readings table with dual MPU6050 and HC-SR04 support.")
         cursor.execute("""
             CREATE TABLE sensor_readings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,12 +43,19 @@ def init_db():
                 seq INTEGER NOT NULL,
                 device_ms INTEGER NOT NULL,
                 vibration INTEGER NOT NULL,
-                accel_x REAL NOT NULL,
-                accel_y REAL NOT NULL,
-                accel_z REAL NOT NULL,
-                gyro_x REAL NOT NULL,
-                gyro_y REAL NOT NULL,
-                gyro_z REAL NOT NULL,
+                mpu1_ax REAL NOT NULL,
+                mpu1_ay REAL NOT NULL,
+                mpu1_az REAL NOT NULL,
+                mpu1_gx REAL NOT NULL,
+                mpu1_gy REAL NOT NULL,
+                mpu1_gz REAL NOT NULL,
+                mpu2_ax REAL NOT NULL,
+                mpu2_ay REAL NOT NULL,
+                mpu2_az REAL NOT NULL,
+                mpu2_gx REAL NOT NULL,
+                mpu2_gy REAL NOT NULL,
+                mpu2_gz REAL NOT NULL,
+                distance_cm REAL NOT NULL,
                 received_at TEXT NOT NULL
             )
         """)
@@ -57,7 +64,7 @@ def init_db():
         print("Database schema is up to date.")
     conn.close()
 
-def save_reading(device_id, seq, device_ms, vibration, ax, ay, az, gx, gy, gz):
+def save_reading(device_id, seq, device_ms, vibration, mpu1_data, mpu2_data, distance_cm):
     """Inserts a sensor reading into the SQLite database."""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
@@ -65,12 +72,22 @@ def save_reading(device_id, seq, device_ms, vibration, ax, ay, az, gx, gy, gz):
     try:
         cursor.execute(
             """INSERT INTO sensor_readings (
-                device_id, seq, device_ms, vibration, accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z, received_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (device_id, seq, device_ms, vibration, ax, ay, az, gx, gy, gz, received_at)
+                device_id, seq, device_ms, vibration, 
+                mpu1_ax, mpu1_ay, mpu1_az, mpu1_gx, mpu1_gy, mpu1_gz,
+                mpu2_ax, mpu2_ay, mpu2_az, mpu2_gx, mpu2_gy, mpu2_gz,
+                distance_cm, received_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                device_id, seq, device_ms, vibration,
+                mpu1_data.get("ax", 0.0), mpu1_data.get("ay", 0.0), mpu1_data.get("az", 0.0),
+                mpu1_data.get("gx", 0.0), mpu1_data.get("gy", 0.0), mpu1_data.get("gz", 0.0),
+                mpu2_data.get("ax", 0.0), mpu2_data.get("ay", 0.0), mpu2_data.get("az", 0.0),
+                mpu2_data.get("gx", 0.0), mpu2_data.get("gy", 0.0), mpu2_data.get("gz", 0.0),
+                distance_cm, received_at
+            )
         )
         conn.commit()
-        print(f"[{received_at}] Saved [{device_id}] #{seq}: Vib={vibration}, Accel=[{ax:.2f},{ay:.2f},{az:.2f}], Gyro=[{gx:.2f},{gy:.2f},{gz:.2f}]")
+        print(f"[{received_at}] Saved [{device_id}] #{seq}: Vib={vibration}, MPU1_A=[{mpu1_data.get('ax'):.2f},{mpu1_data.get('ay'):.2f},{mpu1_data.get('az'):.2f}], MPU2_A=[{mpu2_data.get('ax'):.2f},{mpu2_data.get('ay'):.2f},{mpu2_data.get('az'):.2f}], Dist={distance_cm:.2f} cm")
     except sqlite3.Error as e:
         print(f"Database error: {e}", file=sys.stderr)
     finally:
@@ -99,19 +116,16 @@ def on_message(client, userdata, msg):
         seq = payload.get("seq")
         device_ms = payload.get("ms")
         vib = payload.get("vib")
-        ax = payload.get("ax")
-        ay = payload.get("ay")
-        az = payload.get("az")
-        gx = payload.get("gx")
-        gy = payload.get("gy")
-        gz = payload.get("gz")
+        mpu1_data = payload.get("mpu1", {})
+        mpu2_data = payload.get("mpu2", {})
+        distance_cm = payload.get("distance_cm")
         
-        if None in (seq, device_ms, vib, ax, ay, az, gx, gy, gz):
+        if None in (seq, device_ms, vib, distance_cm):
             print(f"Warning: Received incomplete payload: {payload}", file=sys.stderr)
             return
             
         # Save to database
-        save_reading(dev, seq, device_ms, vib, ax, ay, az, gx, gy, gz)
+        save_reading(dev, seq, device_ms, vib, mpu1_data, mpu2_data, distance_cm)
         
     except json.JSONDecodeError:
         print(f"Error: Failed to decode JSON payload: {msg.payload}", file=sys.stderr)
@@ -122,7 +136,7 @@ def on_message(client, userdata, msg):
 # MAIN EXECUTION
 # ==========================================
 def main():
-    print("--- Starting Pi MQTT Receiver (Vibration & Motion) ---")
+    print("--- Starting Pi MQTT Receiver (Vibration, Motion & Distance) ---")
     init_db()
 
     # Create MQTT client instance with compatibility for Paho 2.x
