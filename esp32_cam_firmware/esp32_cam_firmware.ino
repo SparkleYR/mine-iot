@@ -4,6 +4,10 @@
 #include <WebServer.h>
 #include <HTTPClient.h>
 
+// SOC Headers for hardware brownout detector control
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
+
 // =====================================================
 // WIFI & PI SERVER CONFIGURATION
 // =====================================================
@@ -198,12 +202,15 @@ void handle_flash_off() {
 // =====================================================
 
 void setup() {
+  // CRITICAL FIX: Disable hardware brownout detector to prevent ESP32-CAM resets during peak Wi-Fi TX
+  WRITE_PERI_REG(RTC_CNTL_BROWNOUT_REG, 0);
+
   Serial.begin(115200);
   delay(1000);
 
   Serial.println();
   Serial.println("==============================");
-  Serial.println("ESP32-CAM STARTING");
+  Serial.println("ESP32-CAM STARTING (BROWNOUT PROTECTED)");
   Serial.println("==============================");
 
   // ---------------------------------------------------
@@ -281,11 +288,11 @@ void setup() {
   Serial.print("ESP32-CAM IP Address: ");
   Serial.println(WiFi.localIP());
 
-  // CRITICAL FIX FOR TIMEOUTS: Disable Wi-Fi modem power saving mode
-  // ESP32 default Wi-Fi sleep causes HTTP POST latency & timeouts when transmitting frame buffers
+  // CRITICAL FIX FOR TIMEOUTS & BROWNOUT: Disable Wi-Fi modem sleep and set TX power to 17dBm
   WiFi.setSleep(false);
   esp_wifi_set_ps(WIFI_PS_NONE);
-  Serial.println("[WIFI] Power save mode DISABLED for maximum HTTP throughput.");
+  WiFi.setTxPower(WIFI_POWER_17dBm);
+  Serial.println("[WIFI] Power save mode DISABLED and TX power tuned for stability.");
 
   // ---------------------------------------------------
   // WEB SERVER ROUTES
