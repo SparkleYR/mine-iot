@@ -13,7 +13,7 @@
 
 const char* ssid             = "Pi4B-Hotspot";
 const char* password         = "abcdefgh";
-const char* pi_upload_url    = "http://10.42.0.1:5000/upload";
+const char* pi_upload_url    = "http://192.168.1.1:5000/upload";
 
 // Auto capture interval in milliseconds (0 = disabled, 10000 = every 10 sec)
 const unsigned long AUTO_CAPTURE_INTERVAL = 10000;
