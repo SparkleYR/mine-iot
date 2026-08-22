@@ -12,7 +12,7 @@ MQTT_PORT = 1883
 MQTT_TOPIC = "esp32/sensor_data"
 
 def main():
-    print("--- Starting Mock ESP32 Publisher ---")
+    print("--- Starting Mock ESP32 Publisher (Vibration & Motion) ---")
     
     # Create MQTT client instance with compatibility for Paho 2.x
     try:
@@ -38,10 +38,25 @@ def main():
         for _ in range(5):
             seq += 1
             device_ms = int(time.time() * 1000) - start_time
-            temp = round(20.0 + random.uniform(0, 10), 2)
-            hum = round(40.0 + random.uniform(0, 30), 2)
+            vib = random.choice([0, 0, 0, 1])  # Occasional vibration
+            ax = round(random.uniform(-0.5, 0.5), 3)
+            ay = round(random.uniform(-0.5, 0.5), 3)
+            az = round(9.8 + random.uniform(-0.2, 0.2), 3) # Gravity on Z
+            gx = round(random.uniform(-0.1, 0.1), 3)
+            gy = round(random.uniform(-0.1, 0.1), 3)
+            gz = round(random.uniform(-0.1, 0.1), 3)
             
-            payload = {"seq": seq, "ms": device_ms, "temp": temp, "hum": hum}
+            payload = {
+                "seq": seq,
+                "ms": device_ms,
+                "vib": vib,
+                "ax": ax,
+                "ay": ay,
+                "az": az,
+                "gx": gx,
+                "gy": gy,
+                "gz": gz
+            }
             client.publish(MQTT_TOPIC, json.dumps(payload))
             print(f"Published: {payload}")
             time.sleep(2)
@@ -53,9 +68,25 @@ def main():
         for _ in range(3):
             seq += 1
             device_ms = int(time.time() * 1000) - start_time
-            temp = round(20.0 + random.uniform(0, 10), 2)
-            hum = round(40.0 + random.uniform(0, 30), 2)
-            buffered_payloads.append({"seq": seq, "ms": device_ms, "temp": temp, "hum": hum})
+            vib = random.choice([0, 1])  # More frequent vibration during event
+            ax = round(random.uniform(-1.5, 1.5), 3)
+            ay = round(random.uniform(-1.5, 1.5), 3)
+            az = round(9.8 + random.uniform(-1.0, 1.0), 3)
+            gx = round(random.uniform(-0.5, 0.5), 3)
+            gy = round(random.uniform(-0.5, 0.5), 3)
+            gz = round(random.uniform(-0.5, 0.5), 3)
+            
+            buffered_payloads.append({
+                "seq": seq,
+                "ms": device_ms,
+                "vib": vib,
+                "ax": ax,
+                "ay": ay,
+                "az": az,
+                "gx": gx,
+                "gy": gy,
+                "gz": gz
+            })
             time.sleep(1)
 
         print(f"ESP32 Offline. Generated {len(buffered_payloads)} readings in RAM.")

@@ -9,7 +9,7 @@ import paho.mqtt.client as mqtt
 # ==========================================
 # CONFIGURATION
 # ==========================================
-MQTT_BROKER = "localhost"  # Set to "localhost" if running on the Pi directly
+MQTT_BROKER = "localhost"
 MQTT_PORT = 1883
 MQTT_TOPIC = "esp32/sensor_data"
 DB_FILE = "sensor_data.db"
@@ -18,35 +18,58 @@ DB_FILE = "sensor_data.db"
 # DATABASE SETUP
 # ==========================================
 def init_db():
-    """Initializes the SQLite database and creates the readings table if it doesn't exist."""
+    """Initializes the SQLite database and handles schema migrations automatically."""
     print(f"Initializing database: {DB_FILE}")
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS sensor_readings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            seq INTEGER NOT NULL,
-            device_ms INTEGER NOT NULL,
-            temperature REAL NOT NULL,
-            humidity REAL NOT NULL,
-            received_at TEXT NOT NULL
-        )
-    """)
-    conn.commit()
+    
+    # Check if table exists and inspect columns
+    cursor.execute("PRAGMA table_info(sensor_readings)")
+    columns = [col[1] for col in cursor.fetchall()]
+    
+    # Migrate if table has old schema (lacks vibration column)
+    if columns and "vibration" not in columns:
+        print("[MIGRATION] Schema mismatch detected (old temp/humidity schema). Dropping old table.")
+        cursor.execute("DROP TABLE sensor_readings")
+        conn.commit()
+        columns = []
+        
+    if not columns:
+        print("Creating new sensor_readings table with updated vibration & motion schema.")
+        cursor.execute("""
+            CREATE TABLE sensor_readings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                seq INTEGER NOT NULL,
+                device_ms INTEGER NOT NULL,
+                vibration INTEGER NOT NULL,
+                accel_x REAL NOT NULL,
+                accel_y REAL NOT NULL,
+                accel_z REAL NOT NULL,
+                gyro_x REAL NOT NULL,
+                gyro_y REAL NOT NULL,
+                gyro_z REAL NOT NULL,
+                received_at TEXT NOT NULL
+            )
+        """)
+        conn.commit()
+    else:
+        print("Database schema is up to date.")
     conn.close()
 
-def save_reading(seq, device_ms, temperature, humidity):
+def save_reading(seq, device_ms, vibration, ax, ay, az, gx, gy, gz):
     """Inserts a sensor reading into the SQLite database."""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     received_at = datetime.datetime.utcnow().isoformat()
     try:
         cursor.execute(
-            "INSERT INTO sensor_readings (seq, device_ms, temperature, humidity, received_at) VALUES (?, ?, ?, ?, ?)",
-            (seq, device_ms, temperature, humidity, received_at)
+            """INSERT INTO sensor_readings (
+                seq, device_ms, vibration, accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z, received_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (seq, device_ms, vibration, ax, ay, az, gx, gy, gz, received_at)
         )
         conn.commit()
-        print(f"[{received_at}] Saved reading: Seq={seq}, Temp={temperature}°C, Hum={humidity}%, DeviceMs={device_ms}")
+        print(f"[{received_at}] Saved: Seq={seq}, Vib={vibration}, Accel=[{ax:.2f},{ay:.2f},{az:.2f}], Gyro=[{gx:.2f},{gy:.2f},{gz:.2f}]")
     except sqlite3.Error as e:
         print(f"Database error: {e}", file=sys.stderr)
     finally:
@@ -59,7 +82,6 @@ def on_connect(client, userdata, flags, rc):
     """Callback when client connects to the broker."""
     if rc == 0:
         print(f"Connected successfully to MQTT Broker ({MQTT_BROKER}:{MQTT_PORT})")
-        # Subscribe to the topic
         client.subscribe(MQTT_TOPIC)
         print(f"Subscribed to topic: {MQTT_TOPIC}")
     else:
@@ -74,15 +96,20 @@ def on_message(client, userdata, msg):
         # Extract fields
         seq = payload.get("seq")
         device_ms = payload.get("ms")
-        temp = payload.get("temp")
-        hum = payload.get("hum")
+        vib = payload.get("vib")
+        ax = payload.get("ax")
+        ay = payload.get("ay")
+        az = payload.get("az")
+        gx = payload.get("gx")
+        gy = payload.get("gy")
+        gz = payload.get("gz")
         
-        if None in (seq, device_ms, temp, hum):
+        if None in (seq, device_ms, vib, ax, ay, az, gx, gy, gz):
             print(f"Warning: Received incomplete payload: {payload}", file=sys.stderr)
             return
             
         # Save to database
-        save_reading(seq, device_ms, temp, hum)
+        save_reading(seq, device_ms, vib, ax, ay, az, gx, gy, gz)
         
     except json.JSONDecodeError:
         print(f"Error: Failed to decode JSON payload: {msg.payload}", file=sys.stderr)
@@ -93,7 +120,7 @@ def on_message(client, userdata, msg):
 # MAIN EXECUTION
 # ==========================================
 def main():
-    print("--- starting Pi MQTT Receiver ---")
+    print("--- Starting Pi MQTT Receiver (Vibration & Motion) ---")
     init_db()
 
     # Create MQTT client instance with compatibility for Paho 2.x
@@ -103,20 +130,16 @@ def main():
     except ImportError:
         client = mqtt.Client()
 
-    # Assign callbacks
     client.on_connect = on_connect
     client.on_message = on_message
 
-    # Attempt connection
     try:
         print(f"Connecting to broker at {MQTT_BROKER}...")
         client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
     except Exception as e:
         print(f"Failed to connect to broker: {e}", file=sys.stderr)
-        print("Please ensure Mosquitto broker is running. Exiting.", file=sys.stderr)
         sys.exit(1)
 
-    # Start network loop (handles auto-reconnect automatically)
     print("Starting listener loop. Press Ctrl+C to exit.")
     try:
         client.loop_forever()
