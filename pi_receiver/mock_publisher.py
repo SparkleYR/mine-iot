@@ -12,7 +12,7 @@ MQTT_PORT = 1883
 MQTT_TOPIC = "esp32/sensor_data"
 
 def main():
-    print("--- Starting Mock ESP32 Publisher (Vibration, Motion & Distance) ---")
+    print("--- Starting Mock ESP32 Publisher (Full Sensors) ---")
     
     # Create MQTT client instance with compatibility for Paho 2.x
     try:
@@ -38,39 +38,45 @@ def main():
         for _ in range(5):
             seq += 1
             device_ms = int(time.time() * 1000) - start_time
-            vib = random.choice([0, 0, 0, 1])  # Occasional vibration
-            dist = round(10.0 + random.uniform(0, 150), 2) # HC-SR04 distance
+            vib = random.choice([0, 0, 0, 1])
+            dist = round(10.0 + random.uniform(0, 150), 2)
+            buzzer = 1 if dist < 50.0 else 0
+            mq2 = random.randint(200, 1500)
             
-            # MPU1
-            ax1 = round(random.uniform(-0.5, 0.5), 3)
-            ay1 = round(random.uniform(-0.5, 0.5), 3)
-            az1 = round(9.8 + random.uniform(-0.2, 0.2), 3)
-            gx1 = round(random.uniform(-0.1, 0.1), 3)
-            gy1 = round(random.uniform(-0.1, 0.1), 3)
-            gz1 = round(random.uniform(-0.1, 0.1), 3)
+            # DHT11 sometimes None
+            temp = round(20.0 + random.uniform(0, 15), 2) if random.random() > 0.1 else None
+            hum = round(40.0 + random.uniform(0, 40), 2) if temp is not None else None
             
-            # MPU2
-            ax2 = round(9.8 + random.uniform(-0.2, 0.2), 3) # Placed vertically
-            ay2 = round(random.uniform(-0.5, 0.5), 3)
-            az2 = round(random.uniform(-0.5, 0.5), 3)
-            gx2 = round(random.uniform(-0.1, 0.1), 3)
-            gy2 = round(random.uniform(-0.1, 0.1), 3)
-            gz2 = round(random.uniform(-0.1, 0.1), 3)
+            # ADXL345
+            adxl_ax = round(random.uniform(-0.5, 0.5), 3)
+            adxl_ay = round(random.uniform(-0.5, 0.5), 3)
+            adxl_az = round(9.8 + random.uniform(-0.2, 0.2), 3)
+            
+            # MPU6050
+            mpu_ax = round(random.uniform(-0.5, 0.5), 3)
+            mpu_ay = round(random.uniform(-0.5, 0.5), 3)
+            mpu_az = round(9.8 + random.uniform(-0.2, 0.2), 3)
+            mpu_gx = round(random.uniform(-0.1, 0.1), 3)
+            mpu_gy = round(random.uniform(-0.1, 0.1), 3)
+            mpu_gz = round(random.uniform(-0.1, 0.1), 3)
             
             payload = {
                 "dev": "mock_esp32_1",
                 "seq": seq,
                 "ms": device_ms,
                 "vib": vib,
-                "mpu1": {
-                    "ax": ax1, "ay": ay1, "az": az1,
-                    "gx": gx1, "gy": gy1, "gz": gz1
+                "adxl345": {
+                    "ax": adxl_ax, "ay": adxl_ay, "az": adxl_az
                 },
-                "mpu2": {
-                    "ax": ax2, "ay": ay2, "az": az2,
-                    "gx": gx2, "gy": gy2, "gz": gz2
+                "mpu6050": {
+                    "ax": mpu_ax, "ay": mpu_ay, "az": mpu_az,
+                    "gx": mpu_gx, "gy": mpu_gy, "gz": mpu_gz
                 },
-                "distance_cm": dist
+                "distance_cm": dist,
+                "buzzer": buzzer,
+                "mq2_raw": mq2,
+                "temperature": temp,
+                "humidity": hum
             }
             client.publish(MQTT_TOPIC, json.dumps(payload))
             print(f"Published: {payload}")
@@ -85,37 +91,42 @@ def main():
             device_ms = int(time.time() * 1000) - start_time
             vib = random.choice([0, 1])
             dist = round(10.0 + random.uniform(0, 150), 2)
+            buzzer = 1 if dist < 50.0 else 0
+            mq2 = random.randint(200, 1500)
             
-            # MPU1
-            ax1 = round(random.uniform(-1.5, 1.5), 3)
-            ay1 = round(random.uniform(-1.5, 1.5), 3)
-            az1 = round(9.8 + random.uniform(-1.0, 1.0), 3)
-            gx1 = round(random.uniform(-0.5, 0.5), 3)
-            gy1 = round(random.uniform(-0.5, 0.5), 3)
-            gz1 = round(random.uniform(-0.5, 0.5), 3)
+            temp = round(20.0 + random.uniform(0, 15), 2)
+            hum = round(40.0 + random.uniform(0, 40), 2)
             
-            # MPU2
-            ax2 = round(9.8 + random.uniform(-1.0, 1.0), 3)
-            ay2 = round(random.uniform(-1.5, 1.5), 3)
-            az2 = round(random.uniform(-1.5, 1.5), 3)
-            gx2 = round(random.uniform(-0.5, 0.5), 3)
-            gy2 = round(random.uniform(-0.5, 0.5), 3)
-            gz2 = round(random.uniform(-0.5, 0.5), 3)
+            # ADXL345
+            adxl_ax = round(random.uniform(-1.5, 1.5), 3)
+            adxl_ay = round(random.uniform(-1.5, 1.5), 3)
+            adxl_az = round(9.8 + random.uniform(-1.0, 1.0), 3)
+            
+            # MPU6050
+            mpu_ax = round(random.uniform(-1.5, 1.5), 3)
+            mpu_ay = round(random.uniform(-1.5, 1.5), 3)
+            mpu_az = round(9.8 + random.uniform(-1.0, 1.0), 3)
+            mpu_gx = round(random.uniform(-0.5, 0.5), 3)
+            mpu_gy = round(random.uniform(-0.5, 0.5), 3)
+            mpu_gz = round(random.uniform(-0.5, 0.5), 3)
             
             buffered_payloads.append({
                 "dev": "mock_esp32_1",
                 "seq": seq,
                 "ms": device_ms,
                 "vib": vib,
-                "mpu1": {
-                    "ax": ax1, "ay": ay1, "az": az1,
-                    "gx": gx1, "gy": gy1, "gz": gz1
+                "adxl345": {
+                    "ax": adxl_ax, "ay": adxl_ay, "az": adxl_az
                 },
-                "mpu2": {
-                    "ax": ax2, "ay": ay2, "az": az2,
-                    "gx": gx2, "gy": gy2, "gz": gz2
+                "mpu6050": {
+                    "ax": mpu_ax, "ay": mpu_ay, "az": mpu_az,
+                    "gx": mpu_gx, "gy": mpu_gy, "gz": mpu_gz
                 },
-                "distance_cm": dist
+                "distance_cm": dist,
+                "buzzer": buzzer,
+                "mq2_raw": mq2,
+                "temperature": temp,
+                "humidity": hum
             })
             time.sleep(1)
 

@@ -1,13 +1,17 @@
-# Reliable IoT Data Sharing: ESP32 to Raspberry Pi 4B (Multi-Sensor & Multi-Node)
+# Reliable IoT Data Sharing: ESP32 to Raspberry Pi 4B (All Sensors & Multi-Node)
 
 This repository contains a robust, connection-drop-resilient data sharing system between multiple **ESP32 microcontrollers** and a **Raspberry Pi 4B**.
 
 This version supports:
+* **ADXL345** Accelerometer (0x53)
+* **MPU6050** Gyroscope/Accelerometer (0x69)
 * **SW-420** Vibration Sensor
-* **Dual MPU6050** Gyroscope/Accelerometer (0x68 and 0x69)
 * **HC-SR04** Ultrasonic Distance Sensor
+* **Buzzer** (Active when distance < 50.0 cm)
+* **MQ-2** Gas/Smoke Sensor (Analog)
+* **DHT11** Temperature & Humidity Sensor
 * **Multi-Node tracking** (`device_id` column in SQLite)
-* **Wi-Fi connection** via your Wi-Fi network `VIRUS` (SSID: `VIRUS`, Password: `abcdefgh`).
+* **Wi-Fi connection** via the Pi's broadcast network (`Pi4B-Hotspot` SSID, Password: `abcdefgh`, Broker: `10.42.0.1`).
 
 ---
 
@@ -17,14 +21,15 @@ On your ESP32, wire the sensors as follows:
 
 | Sensor / Module | Sensor Pin | ESP32 Pin | Description |
 | :--- | :--- | :--- | :--- |
-| **MPU6050 #1** | VCC | 3.3V | Power |
+| **ADXL345** | VCC | 3.3V | Power |
 | | GND | GND | Ground |
-| | SCL | GPIO 22 | I2C Clock (Default SCL) |
-| | SDA | GPIO 21 | I2C Data (Default SDA) |
-| **MPU6050 #2 / GY-87** | VCC | 3.3V | Power |
+| | SCL | GPIO 22 | I2C Clock (Shared SCL) |
+| | SDA | GPIO 21 | I2C Data (Shared SDA) |
+| **MPU6050** | VCC | 3.3V | Power |
 | | GND | GND | Ground |
-| | SCL | GPIO 22 | Shared I2C Clock |
-| | SDA | GPIO 21 | Shared I2C Data |
+| | SCL | GPIO 22 | I2C Clock (Shared SCL) |
+| | SDA | GPIO 21 | I2C Data (Shared SDA) |
+| | AD0 | 3.3V | Address pin pulled HIGH to set to 0x69 |
 | **SW-420** | VCC | 3.3V | Power |
 | | GND | GND | Ground |
 | | DO | GPIO 13 | Digital Output (Vibration trigger) |
@@ -32,6 +37,13 @@ On your ESP32, wire the sensors as follows:
 | | GND | GND | Ground |
 | | TRIG | GPIO 25 | Trigger Pulse Input |
 | | ECHO | GPIO 26 | Echo Signal Output |
+| **Buzzer** | positive (+) | GPIO 27 | Active Output Trigger |
+| **MQ-2** | VCC | 5V / VIN | Power |
+| | GND | GND | Ground |
+| | AO | GPIO 34 | Analog Output (ADC1_CH6) |
+| **DHT11** | VCC | 3.3V / 5V | Power |
+| | GND | GND | Ground |
+| | DATA | GPIO 33 | One-Wire Data Pin |
 
 ---
 
@@ -39,9 +51,13 @@ On your ESP32, wire the sensors as follows:
 
 ### Phase 1: Setup Raspberry Pi 4B
 
-#### 1. Connect the Pi to your Wi-Fi
-Connect your Pi to your Wi-Fi network **`VIRUS`** (Password: `abcdefgh`).
-Once connected, the Pi's IP address on the Wi-Fi network is **`10.48.78.8`**.
+#### 1. Configure the Wi-Fi Hotspot on the Pi
+Open a terminal on your Pi and run:
+```bash
+# Create and start the Wi-Fi Hotspot using NetworkManager
+sudo nmcli device wifi hotspot ifname wlan0 ssid Pi4B-Hotspot password "abcdefgh"
+```
+The Pi's IP address on this hotspot interface will be `10.42.0.1`.
 
 #### 2. Run the Receiver Script
 On the Pi, navigate to the `pi_receiver/` folder and run:
@@ -49,7 +65,7 @@ On the Pi, navigate to the `pi_receiver/` folder and run:
 source venv/bin/activate
 python3 receiver.py
 ```
-This automatically handles database migrations to the new multi-sensor layout.
+This automatically handles database migrations to the new layout.
 
 ---
 
@@ -71,7 +87,9 @@ Open the project file [esp32_firmware.ino](esp32_firmware/esp32_firmware.ino) in
 Go to **Sketch** -> **Include Library** -> **Manage Libraries...** and install:
 1. **PubSubClient** by Nick O'Leary
 2. **Adafruit MPU6050** by Adafruit
-3. **Adafruit Unified Sensor** by Adafruit
+3. **Adafruit ADXL345** by Adafruit
+4. **Adafruit Unified Sensor** by Adafruit
+5. **DHT sensor library** by Adafruit
 
 #### 3. Flash your ESP32
 Connect your board, select the correct Port/Board under **Tools**, and click **Upload**.
@@ -91,4 +109,4 @@ Query the database on your Pi to verify:
 ```bash
 python3 -c "import sqlite3; conn = sqlite3.connect('pi_receiver/sensor_data.db'); c = conn.cursor(); c.execute('SELECT * FROM sensor_readings ORDER BY seq ASC'); [print(row) for row in c.fetchall()]; conn.close()"
 ```
-Output columns correspond to: `[id, device_id, seq, device_ms, vibration, mpu1_ax, mpu1_ay, mpu1_az, mpu1_gx, mpu1_gy, mpu1_gz, mpu2_ax, mpu2_ay, mpu2_az, mpu2_gx, mpu2_gy, mpu2_gz, distance_cm, received_at]`.
+Output columns correspond to: `[id, device_id, seq, device_ms, vibration, adxl_ax/y/z, mpu_ax/y/z, mpu_gx/y/z, distance_cm, buzzer, mq2_raw, temperature, humidity, received_at]`.
