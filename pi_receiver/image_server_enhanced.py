@@ -2,6 +2,7 @@
 
 import os
 import json
+import base64
 import logging
 import threading
 import urllib.request
@@ -95,9 +96,11 @@ def process_image(jpeg_data):
     t_forward.start()
 
     # 3. Register with API
+    image_b64 = base64.b64encode(jpeg_data).decode('utf-8')
     image_url = f"/photos/{filename}"
     metadata = {
         "title": f"ESP32-CAM Capture {now.strftime('%Y-%m-%d %H:%M:%S')}",
+        "imageBase64": image_b64,
         "imageUrl": image_url,
         "thumbnailUrl": image_url,
         "nodeId": "ESP-NODE-01",
