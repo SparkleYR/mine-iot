@@ -214,11 +214,11 @@ void readSensors(int &vib, float &ax, float &ay, float &az, float &gx, float &gy
 }
 
 bool publishDataPoint(const DataPoint &dp) {
-  // Construct JSON payload
+  // Construct JSON payload with device identifier
   char payload[256];
   snprintf(payload, sizeof(payload), 
-           "{\"seq\":%u,\"ms\":%u,\"vib\":%d,\"ax\":%.3f,\"ay\":%.3f,\"az\":%.3f,\"gx\":%.3f,\"gy\":%.3f,\"gz\":%.3f}", 
-           dp.seq, dp.timestamp_ms, dp.vibration, dp.ax, dp.ay, dp.az, dp.gx, dp.gy, dp.gz);
+           "{\"dev\":\"%s\",\"seq\":%u,\"ms\":%u,\"vib\":%d,\"ax\":%.3f,\"ay\":%.3f,\"az\":%.3f,\"gx\":%.3f,\"gy\":%.3f,\"gz\":%.3f}", 
+           mqtt_client_id, dp.seq, dp.timestamp_ms, dp.vibration, dp.ax, dp.ay, dp.az, dp.gx, dp.gy, dp.gz);
 
   return mqttClient.publish(mqtt_topic, payload);
 }

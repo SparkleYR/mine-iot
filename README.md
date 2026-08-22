@@ -122,4 +122,4 @@ Run the following script to query the database and verify:
 ```bash
 python3 -c "import sqlite3; conn = sqlite3.connect('pi_receiver/sensor_data.db'); c = conn.cursor(); c.execute('SELECT * FROM sensor_readings ORDER BY seq ASC'); [print(row) for row in c.fetchall()]; conn.close()"
 ```
-Output columns correspond to: `[id, seq, device_ms, vibration, accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z, received_at]`.
+Output columns correspond to: `[id, device_id, seq, device_ms, vibration, accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z, received_at]`.

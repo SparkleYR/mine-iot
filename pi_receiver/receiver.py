@@ -27,18 +27,19 @@ def init_db():
     cursor.execute("PRAGMA table_info(sensor_readings)")
     columns = [col[1] for col in cursor.fetchall()]
     
-    # Migrate if table has old schema (lacks vibration column)
-    if columns and "vibration" not in columns:
-        print("[MIGRATION] Schema mismatch detected (old temp/humidity schema). Dropping old table.")
+    # Migrate if table has old schema (lacks device_id column)
+    if columns and "device_id" not in columns:
+        print("[MIGRATION] Schema mismatch detected (lacks device_id). Dropping old table.")
         cursor.execute("DROP TABLE sensor_readings")
         conn.commit()
         columns = []
         
     if not columns:
-        print("Creating new sensor_readings table with updated vibration & motion schema.")
+        print("Creating new sensor_readings table with multi-node support.")
         cursor.execute("""
             CREATE TABLE sensor_readings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_id TEXT NOT NULL,
                 seq INTEGER NOT NULL,
                 device_ms INTEGER NOT NULL,
                 vibration INTEGER NOT NULL,
@@ -56,7 +57,7 @@ def init_db():
         print("Database schema is up to date.")
     conn.close()
 
-def save_reading(seq, device_ms, vibration, ax, ay, az, gx, gy, gz):
+def save_reading(device_id, seq, device_ms, vibration, ax, ay, az, gx, gy, gz):
     """Inserts a sensor reading into the SQLite database."""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
@@ -64,12 +65,12 @@ def save_reading(seq, device_ms, vibration, ax, ay, az, gx, gy, gz):
     try:
         cursor.execute(
             """INSERT INTO sensor_readings (
-                seq, device_ms, vibration, accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z, received_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (seq, device_ms, vibration, ax, ay, az, gx, gy, gz, received_at)
+                device_id, seq, device_ms, vibration, accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z, received_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (device_id, seq, device_ms, vibration, ax, ay, az, gx, gy, gz, received_at)
         )
         conn.commit()
-        print(f"[{received_at}] Saved: Seq={seq}, Vib={vibration}, Accel=[{ax:.2f},{ay:.2f},{az:.2f}], Gyro=[{gx:.2f},{gy:.2f},{gz:.2f}]")
+        print(f"[{received_at}] Saved [{device_id}] #{seq}: Vib={vibration}, Accel=[{ax:.2f},{ay:.2f},{az:.2f}], Gyro=[{gx:.2f},{gy:.2f},{gz:.2f}]")
     except sqlite3.Error as e:
         print(f"Database error: {e}", file=sys.stderr)
     finally:
@@ -94,6 +95,7 @@ def on_message(client, userdata, msg):
         payload = json.loads(msg.payload.decode('utf-8'))
         
         # Extract fields
+        dev = payload.get("dev", "unknown_device")
         seq = payload.get("seq")
         device_ms = payload.get("ms")
         vib = payload.get("vib")
@@ -109,7 +111,7 @@ def on_message(client, userdata, msg):
             return
             
         # Save to database
-        save_reading(seq, device_ms, vib, ax, ay, az, gx, gy, gz)
+        save_reading(dev, seq, device_ms, vib, ax, ay, az, gx, gy, gz)
         
     except json.JSONDecodeError:
         print(f"Error: Failed to decode JSON payload: {msg.payload}", file=sys.stderr)

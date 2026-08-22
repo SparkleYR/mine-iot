@@ -47,6 +47,7 @@ def main():
             gz = round(random.uniform(-0.1, 0.1), 3)
             
             payload = {
+                "dev": "mock_esp32_1",
                 "seq": seq,
                 "ms": device_ms,
                 "vib": vib,
@@ -77,6 +78,7 @@ def main():
             gz = round(random.uniform(-0.5, 0.5), 3)
             
             buffered_payloads.append({
+                "dev": "mock_esp32_1",
                 "seq": seq,
                 "ms": device_ms,
                 "vib": vib,
