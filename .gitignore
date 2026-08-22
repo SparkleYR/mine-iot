@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.env
+
+# Databases & Data
+*.db
+*.sqlite
+*.csv
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# Arduino/ESP32 build and local settings
+.build/
+build/
+*.hex
+*.elf
+*.bin
+.arduino/
+.vscode/
+.pio/
