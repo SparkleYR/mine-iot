@@ -14,8 +14,8 @@ const char* pi_upload_url    = "http://10.42.0.1:5000/upload";
 // Auto capture interval in milliseconds (0 = disabled, 10000 = every 10 sec)
 const unsigned long AUTO_CAPTURE_INTERVAL = 10000;
 
-// Enable flash LED during auto capture (set to false if USB power causes brownout resets)
-const bool USE_FLASH_ON_CAPTURE = true;
+// Enable flash LED during image capture
+const bool ENABLE_FLASH_ON_CAPTURE = true;
 
 // =====================================================
 // FLASH LED
@@ -82,22 +82,16 @@ bool send_image_to_pi(camera_fb_t *fb) {
 }
 
 // =====================================================
-// CAPTURE IMAGE WITH FLASH
+// SINGLE-GET CAMERA CAPTURE WITH FLASH
 // =====================================================
 
-camera_fb_t* capture_with_flash(bool useFlash) {
+camera_fb_t* capture_image(bool useFlash) {
   if (useFlash) {
     digitalWrite(FLASH_LED_PIN, HIGH);
-    delay(150); // Short flash pulse to avoid power brownouts
+    delay(150); // Give sensor a moment under flash
   }
 
-  // Flush old pre-flash frame buffer if present (due to fb_count = 2)
-  camera_fb_t *fb_stale = esp_camera_fb_get();
-  if (fb_stale) {
-    esp_camera_fb_return(fb_stale);
-  }
-
-  // Capture fresh frame
+  // Get frame buffer EXACTLY ONCE
   camera_fb_t *fb = esp_camera_fb_get();
 
   if (useFlash) {
@@ -112,14 +106,15 @@ camera_fb_t* capture_with_flash(bool useFlash) {
 // =====================================================
 
 void handle_capture() {
-  camera_fb_t *fb = capture_with_flash(true);
+  camera_fb_t *fb = capture_image(ENABLE_FLASH_ON_CAPTURE);
 
   if (!fb) {
+    Serial.println("[ERROR] Camera capture failed!");
     server.send(500, "text/plain", "Camera capture failed");
     return;
   }
 
-  // Upload frame buffer to Pi Server in background
+  // Upload frame buffer to Pi Server (which proxies it to PC)
   send_image_to_pi(fb);
 
   // Send image to requesting HTTP client
@@ -169,7 +164,7 @@ button:hover { background: #0056b3; }
 </head>
 <body>
 <h1>ESP32-CAM Mine Monitoring</h1>
-<h3>Camera Feed & Auto-Upload to Pi</h3>
+<h3>Camera Feed & Auto-Upload to PC</h3>
 <img id="camera" src="/capture">
 <br>
 <button onclick="flashOn()">FLASH ON</button>
@@ -226,28 +221,7 @@ void setup() {
   digitalWrite(FLASH_LED_PIN, LOW);
 
   // ---------------------------------------------------
-  // 1. CONNECT WIFI FIRST (Guarantees network connectivity)
-  // ---------------------------------------------------
-  WiFi.disconnect(true);
-  delay(100);
-  WiFi.mode(WIFI_STA);
-  delay(100);
-
-  WiFi.begin(ssid, password);
-  Serial.printf("Connecting to Wi-Fi %s ", ssid);
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-
-  Serial.println();
-  Serial.println("WiFi connected!");
-  Serial.print("ESP32-CAM IP Address: ");
-  Serial.println(WiFi.localIP());
-
-  // ---------------------------------------------------
-  // 2. CAMERA CONFIGURATION
+  // CAMERA CONFIGURATION
   // ---------------------------------------------------
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -274,21 +248,41 @@ void setup() {
 
   config.frame_size   = FRAMESIZE_VGA; // 640 x 480
   config.jpeg_quality = 12;
-  config.fb_count     = 2;
+  config.fb_count     = 1; // Single buffer to ensure rock-solid get/return semantics
 
   // ---------------------------------------------------
-  // 3. INITIALIZE CAMERA
+  // INITIALIZE CAMERA
   // ---------------------------------------------------
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
-    Serial.printf("[ERROR] Camera initialization FAILED: 0x%X\n", err);
-    Serial.println("[NOTE] Make sure GPIO 0 jumper is DISCONNECTED after flashing!");
-  } else {
-    Serial.println("Camera initialized successfully!");
+    Serial.printf("Camera initialization FAILED: 0x%X\n", err);
+    return;
   }
+  Serial.println("Camera initialized successfully!");
 
   // ---------------------------------------------------
-  // 4. WEB SERVER ROUTES
+  // CONNECT WIFI
+  // ---------------------------------------------------
+  WiFi.disconnect(true);
+  delay(100);
+  WiFi.mode(WIFI_STA);
+  delay(100);
+
+  WiFi.begin(ssid, password);
+  Serial.printf("Connecting to Wi-Fi %s ", ssid);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println();
+  Serial.println("WiFi connected!");
+  Serial.print("ESP32-CAM IP Address: ");
+  Serial.println(WiFi.localIP());
+
+  // ---------------------------------------------------
+  // WEB SERVER ROUTES
   // ---------------------------------------------------
   server.on("/", handle_root);
   server.on("/capture", handle_capture);
@@ -312,9 +306,9 @@ void loop() {
   if (AUTO_CAPTURE_INTERVAL > 0 && (now - lastAutoCaptureTime >= AUTO_CAPTURE_INTERVAL)) {
     lastAutoCaptureTime = now;
 
-    Serial.println("[AUTO-CAPTURE] Capturing Image and sending to Pi...");
-    camera_fb_t *fb = capture_with_flash(USE_FLASH_ON_CAPTURE);
+    camera_fb_t *fb = capture_image(ENABLE_FLASH_ON_CAPTURE);
     if (fb) {
+      Serial.println("[AUTO-CAPTURE] Image captured with flash. Sending to PC...");
       send_image_to_pi(fb);
       esp_camera_fb_return(fb);
     }
