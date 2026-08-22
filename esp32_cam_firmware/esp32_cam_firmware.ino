@@ -13,6 +13,7 @@ const char* pi_upload_url    = "http://10.42.0.1:5000/upload";
 
 // Auto capture interval in milliseconds (0 = disabled, 10000 = every 10 sec)
 const unsigned long AUTO_CAPTURE_INTERVAL = 10000;
+const unsigned long RECONNECT_INTERVAL    = 10000;
 
 // Enable flash LED during image capture
 const bool ENABLE_FLASH_ON_CAPTURE = true;
@@ -52,19 +53,30 @@ const bool ENABLE_FLASH_ON_CAPTURE = true;
 
 WebServer server(80);
 unsigned long lastAutoCaptureTime = 0;
+unsigned long lastReconnectAttempt = 0;
+
+void setupWiFi();
 
 // =====================================================
 // UPLOAD IMAGE TO RASPBERRY PI
 // =====================================================
 
 bool send_image_to_pi(camera_fb_t *fb) {
-  if (!fb || WiFi.status() != WL_CONNECTED) {
-    Serial.println("[HTTP] Cannot send image: No Wi-Fi or empty frame buffer.");
+  if (!fb) {
+    Serial.println("[HTTP] Error: Empty frame buffer.");
+    return false;
+  }
+  
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[HTTP] Cannot send image: Wi-Fi disconnected.");
     return false;
   }
 
+  WiFiClient client;
   HTTPClient http;
-  http.begin(pi_upload_url);
+
+  // Use explicitly initialized WiFiClient socket for cross-core compatibility
+  http.begin(client, pi_upload_url);
   http.addHeader("Content-Type", "image/jpeg");
   http.setTimeout(5000); // 5 sec timeout
 
@@ -74,7 +86,7 @@ bool send_image_to_pi(camera_fb_t *fb) {
   if (httpResponseCode > 0) {
     Serial.printf("[HTTP] Image uploaded successfully! Response code: %d\n", httpResponseCode);
   } else {
-    Serial.printf("[HTTP] Upload failed error: %s\n", http.errorToString(httpResponseCode).c_str());
+    Serial.printf("[HTTP] Upload failed, error: %s\n", http.errorToString(httpResponseCode).c_str());
   }
 
   http.end();
@@ -204,6 +216,37 @@ void handle_flash_off() {
 }
 
 // =====================================================
+// SETUP WIFI
+// =====================================================
+
+void setupWiFi() {
+  Serial.printf("Connecting to Wi-Fi %s ", ssid);
+  WiFi.disconnect(true);
+  delay(100);
+  WiFi.mode(WIFI_STA);
+  delay(100);
+
+  WiFi.begin(ssid, password);
+
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+    delay(500);
+    Serial.print(".");
+    attempts++;
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println();
+    Serial.println("WiFi connected!");
+    Serial.print("ESP32-CAM IP Address: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println();
+    Serial.println("Wi-Fi connection attempt failed. Will retry in background.");
+  }
+}
+
+// =====================================================
 // SETUP
 // =====================================================
 
@@ -263,23 +306,7 @@ void setup() {
   // ---------------------------------------------------
   // CONNECT WIFI
   // ---------------------------------------------------
-  WiFi.disconnect(true);
-  delay(100);
-  WiFi.mode(WIFI_STA);
-  delay(100);
-
-  WiFi.begin(ssid, password);
-  Serial.printf("Connecting to Wi-Fi %s ", ssid);
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-
-  Serial.println();
-  Serial.println("WiFi connected!");
-  Serial.print("ESP32-CAM IP Address: ");
-  Serial.println(WiFi.localIP());
+  setupWiFi();
 
   // ---------------------------------------------------
   // WEB SERVER ROUTES
@@ -299,18 +326,29 @@ void setup() {
 // =====================================================
 
 void loop() {
-  server.handleClient();
-
-  // Automatic periodic capture & upload to Pi
   unsigned long now = millis();
-  if (AUTO_CAPTURE_INTERVAL > 0 && (now - lastAutoCaptureTime >= AUTO_CAPTURE_INTERVAL)) {
-    lastAutoCaptureTime = now;
 
-    camera_fb_t *fb = capture_image(ENABLE_FLASH_ON_CAPTURE);
-    if (fb) {
-      Serial.println("[AUTO-CAPTURE] Image captured with flash. Sending to PC...");
-      send_image_to_pi(fb);
-      esp_camera_fb_return(fb);
+  // Automatic Wi-Fi reconnection handling
+  if (WiFi.status() != WL_CONNECTED) {
+    if (now - lastReconnectAttempt >= RECONNECT_INTERVAL || lastReconnectAttempt == 0) {
+      lastReconnectAttempt = now;
+      setupWiFi();
+    }
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    server.handleClient();
+
+    // Automatic periodic capture & upload to Pi (proxied to PC)
+    if (AUTO_CAPTURE_INTERVAL > 0 && (now - lastAutoCaptureTime >= AUTO_CAPTURE_INTERVAL || lastAutoCaptureTime == 0)) {
+      lastAutoCaptureTime = now;
+
+      camera_fb_t *fb = capture_image(ENABLE_FLASH_ON_CAPTURE);
+      if (fb) {
+        Serial.println("[AUTO-CAPTURE] Image captured with flash. Sending to PC...");
+        send_image_to_pi(fb);
+        esp_camera_fb_return(fb);
+      }
     }
   }
 }
