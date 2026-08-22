@@ -1,112 +1,82 @@
-# Reliable IoT Data Sharing: ESP32 to Raspberry Pi 4B (All Sensors & Multi-Node)
+# Reliable IoT Data Sharing: ESP32 & ESP32-CAM to Raspberry Pi 4B
 
-This repository contains a robust, connection-drop-resilient data sharing system between multiple **ESP32 microcontrollers** and a **Raspberry Pi 4B**.
+This repository contains a robust, multi-node IoT data & image streaming system between **ESP32 microcontrollers**, **ESP32-CAM module**, and a **Raspberry Pi 4B**.
 
-This version supports:
-* **ADXL345** Accelerometer (0x53)
-* **MPU6050** Gyroscope/Accelerometer (0x69)
-* **SW-420** Vibration Sensor
-* **HC-SR04** Ultrasonic Distance Sensor
-* **Buzzer** (Active when distance < 50.0 cm)
-* **MQ-2** Gas/Smoke Sensor (Analog)
-* **DHT11** Temperature & Humidity Sensor
-* **Multi-Node tracking** (`device_id` column in SQLite)
-* **Wi-Fi connection** via the Pi's broadcast network (`Pi4B-Hotspot` SSID, Password: `abcdefgh`, Broker: `10.42.0.1`).
+This repository includes:
+* **ESP32 Telemetry Node**: ADXL345, MPU6050, SW-420, HC-SR04, Buzzer, MQ-2, and DHT11 sensors over MQTT.
+* **ESP32-CAM Node**: Automatic periodic capture & on-demand image uploads over HTTP POST.
+* **Pi Telemetry Receiver**: SQLite storage with 19 schema columns (`receiver.py`).
+* **Pi Image Upload Server**: Python HTTP image server (`image_server.py`) saving timestamped JPEGs to `pi_receiver/captured_images/`.
+* **Wi-Fi Connection**: All nodes connect to the Pi's broadcast network (`Pi4B-Hotspot` SSID, Password: `abcdefgh`, Gateway IP: `10.42.0.1`).
+
+---
+
+## 📷 ESP32-CAM Setup & Operation
+
+### 1. Features
+* Connects to **`Pi4B-Hotspot`** (Password: `abcdefgh`).
+* Runs a local Web Server on Port `80` with a live camera preview (`/capture`), Flash control (`/flash/on`, `/flash/off`), and a manual **CAPTURE & SEND NOW** button.
+* Automatically uploads captured JPEG frames directly to the Raspberry Pi image server at `http://10.42.0.1:5000/upload`.
+* The Pi saves each uploaded image in `pi_receiver/captured_images/` with a precise timestamp filename (e.g. `img_20260822_232256_984300.jpg`).
+
+### 2. Flash the ESP32-CAM
+1. Open the project file [esp32_cam_firmware.ino](esp32_cam_firmware/esp32_cam_firmware.ino) in Arduino IDE.
+2. Select Board: **AI Thinker ESP32-CAM**.
+3. Under **Tools**, set:
+   * PSRAM: **Enabled** (if available)
+   * Partition Scheme: **Huge APP (3MB No OTA/1MB SPIFFS)**
+4. Connect GPIO 0 to GND while flashing, then disconnect GPIO 0 and press Reset.
 
 ---
 
 ## Hardware Pin Connections
 
-On your ESP32, wire the sensors as follows:
-
+### 1. ESP32 Sensor Node
 | Sensor / Module | Sensor Pin | ESP32 Pin | Description |
 | :--- | :--- | :--- | :--- |
-| **ADXL345** | VCC | 3.3V | Power |
-| | GND | GND | Ground |
-| | SCL | GPIO 22 | I2C Clock (Shared SCL) |
-| | SDA | GPIO 21 | I2C Data (Shared SDA) |
-| **MPU6050** | VCC | 3.3V | Power |
-| | GND | GND | Ground |
-| | SCL | GPIO 22 | I2C Clock (Shared SCL) |
-| | SDA | GPIO 21 | I2C Data (Shared SDA) |
-| | AD0 | 3.3V | Address pin pulled HIGH to set to 0x69 |
-| **SW-420** | VCC | 3.3V | Power |
-| | GND | GND | Ground |
-| | DO | GPIO 13 | Digital Output (Vibration trigger) |
-| **HC-SR04** | VCC | 5V / VIN | Power |
-| | GND | GND | Ground |
-| | TRIG | GPIO 25 | Trigger Pulse Input |
-| | ECHO | GPIO 26 | Echo Signal Output |
-| **Buzzer** | positive (+) | GPIO 27 | Active Output Trigger |
-| **MQ-2** | VCC | 5V / VIN | Power |
-| | GND | GND | Ground |
-| | AO | GPIO 34 | Analog Output (ADC1_CH6) |
-| **DHT11** | VCC | 3.3V / 5V | Power |
-| | GND | GND | Ground |
-| | DATA | GPIO 33 | One-Wire Data Pin |
+| **ADXL345** | VCC / GND / SCL / SDA | 3.3V / GND / GPIO 22 / GPIO 21 | Accelerometer (0x53) |
+| **MPU6050** | VCC / GND / SCL / SDA / AD0 | 3.3V / GND / GPIO 22 / GPIO 21 / 3.3V | Gyro/Accel (0x69) |
+| **SW-420** | VCC / GND / DO | 3.3V / GND / GPIO 13 | Vibration Trigger Interrupt |
+| **HC-SR04** | VCC / GND / TRIG / ECHO | 5V / GND / GPIO 25 / GPIO 26 | Ultrasonic Distance Sensor |
+| **Buzzer** | positive (+) / GND | GPIO 27 / GND | Distance Alert (Active < 50cm) |
+| **MQ-2** | VCC / GND / AO | 5V / GND / GPIO 34 | Gas/Smoke Sensor |
+| **DHT11** | VCC / GND / DATA | 3.3V / GND / GPIO 33 | Temperature & Humidity |
+
+### 2. AI Thinker ESP32-CAM Pinout
+Standard AI Thinker GPIO mapping is pre-configured in [esp32_cam_firmware.ino](esp32_cam_firmware/esp32_cam_firmware.ino):
+* Flash LED: **GPIO 4**
+* Y2–Y9: **GPIO 5, 18, 19, 21, 36, 39, 34, 35**
+* XCLK / PCLK / VSYNC / HREF: **GPIO 0, 22, 25, 23**
+* SIOD (SDA) / SIOC (SCL): **GPIO 26, 27**
 
 ---
 
 ## Setup Guide
 
-### Phase 1: Setup Raspberry Pi 4B
+### Phase 1: Raspberry Pi Servers
 
-#### 1. Configure the Wi-Fi Hotspot on the Pi
-Open a terminal on your Pi and run:
-```bash
-# Create and start the Wi-Fi Hotspot using NetworkManager
-sudo nmcli device wifi hotspot ifname wlan0 ssid Pi4B-Hotspot password "abcdefgh"
-```
-The Pi's IP address on this hotspot interface will be `10.42.0.1`.
-
-#### 2. Run the Receiver Script
-On the Pi, navigate to the `pi_receiver/` folder and run:
-```bash
-source venv/bin/activate
-python3 receiver.py
-```
-This automatically handles database migrations to the new layout.
+1. **Activate Wi-Fi Hotspot on Pi**:
+   ```bash
+   sudo nmcli connection modify Hotspot 802-11-wireless.band bg 802-11-wireless.channel 6 connection.autoconnect yes
+   sudo nmcli connection up Hotspot
+   ```
+2. **Start Telemetry & Image Receiver Daemons**:
+   ```bash
+   cd ~/mine-iot/pi_receiver
+   source venv/bin/activate
+   nohup python -u receiver.py > receiver.log 2>&1 &
+   nohup python -u image_server.py > image_server.log 2>&1 &
+   ```
 
 ---
 
-### Phase 2: Setup ESP32 Firmware
+### Phase 2: Viewing Captured Images on Pi / PC
 
-#### 1. Open and Configure Firmware
-Open the project file [esp32_firmware.ino](esp32_firmware/esp32_firmware.ino) in the Arduino IDE.
+Images captured by the ESP32-CAM are automatically saved to:
+* **Raspberry Pi**: `/home/sih/mine-iot/pi_receiver/captured_images/`
+* **Filename Format**: `img_YYYYMMDD_HHMMSS_microseconds.jpg`
 
-* For **ESP32 #1**, set:
-  ```cpp
-  const char* mqtt_client_id = "esp32_sensor_node_1";
-  ```
-* For **ESP32 #2**, set:
-  ```cpp
-  const char* mqtt_client_id = "esp32_sensor_node_2";
-  ```
-
-#### 2. Install Required Libraries in Arduino IDE
-Go to **Sketch** -> **Include Library** -> **Manage Libraries...** and install:
-1. **PubSubClient** by Nick O'Leary
-2. **Adafruit MPU6050** by Adafruit
-3. **Adafruit ADXL345** by Adafruit
-4. **Adafruit Unified Sensor** by Adafruit
-5. **DHT sensor library** by Adafruit
-
-#### 3. Flash your ESP32
-Connect your board, select the correct Port/Board under **Tools**, and click **Upload**.
-
----
-
-### Phase 3: Verification & Simulation
-
-#### 1. Run the Mock Simulation on the Pi
+To view the saved images on the Pi:
 ```bash
-source pi_receiver/venv/bin/activate
-python3 pi_receiver/mock_publisher.py
+ls -la ~/mine-iot/pi_receiver/captured_images/
 ```
-
-#### 2. View Telemetry in SQLite
-Query the database on your Pi to verify:
-```bash
-python3 -c "import sqlite3; conn = sqlite3.connect('pi_receiver/sensor_data.db'); c = conn.cursor(); c.execute('SELECT * FROM sensor_readings ORDER BY seq ASC'); [print(row) for row in c.fetchall()]; conn.close()"
-```
-Output columns correspond to: `[id, device_id, seq, device_ms, vibration, adxl_ax/y/z, mpu_ax/y/z, mpu_gx/y/z, distance_cm, buzzer, mq2_raw, temperature, humidity, received_at]`.
