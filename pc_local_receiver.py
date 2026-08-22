@@ -136,6 +136,13 @@ class RequestHandler(BaseHTTPRequestHandler):
         self._send_cors_headers()
         self.end_headers()
 
+    def do_HEAD(self):
+        """Handle HEAD requests for CORS and image availability checks."""
+        self.send_response(200)
+        self.send_header('Content-Type', 'image/jpeg')
+        self._send_cors_headers()
+        self.end_headers()
+
     def do_GET(self):
         """Handle GET requests."""
         if self.path == '/health':
@@ -144,6 +151,21 @@ class RequestHandler(BaseHTTPRequestHandler):
         elif self.path == '/api/v1/commands/pending':
             self._send_response(200, {"ok": True, "data": []})
             
+        elif self.path.startswith('/photos/'):
+            filename = os.path.basename(self.path)
+            img_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pi_receiver", "captured_images")
+            filepath = os.path.join(img_dir, filename)
+
+            if os.path.exists(filepath):
+                self.send_response(200)
+                self.send_header('Content-Type', 'image/jpeg')
+                self._send_cors_headers()
+                self.end_headers()
+                with open(filepath, 'rb') as f:
+                    self.wfile.write(f.read())
+            else:
+                self._send_response(404, {"ok": False, "error": "Image file not found"})
+
         else:
             self._send_response(404, {"ok": False, "error": "Not Found"})
 
@@ -178,7 +200,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._send_response(200, {"ok": True, "results": results})
             
         elif self.path == '/api/v1/photos':
-            logger.info(f"Received photo metadata: {body}")
+            logger.info(f"Received photo metadata: {body.get('title')}")
             self._send_response(200, {"ok": True, "data": {"id": str(uuid.uuid4())}})
             
         else:
