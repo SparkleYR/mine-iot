@@ -8,9 +8,9 @@
 // ==========================================
 // CONFIGURATION
 // ==========================================
-const char* ssid          = "Pi4B-Hotspot";
+const char* ssid          = "VIRUS";
 const char* password      = "abcdefgh";
-const char* mqtt_server   = "10.42.0.1";     // IP Address of Raspberry Pi 4B Hotspot
+const char* mqtt_server   = "10.48.78.8";     // IP Address of Raspberry Pi 4B on VIRUS Wi-Fi
 const int mqtt_port       = 1883;            // Default Mosquitto MQTT port
 const char* mqtt_topic    = "esp32/sensor_data";
 const char* mqtt_client_id = "esp32_sensor_node";
