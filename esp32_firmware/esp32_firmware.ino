@@ -462,10 +462,15 @@ void renderBitmap(const uint8_t bitmap[8], uint32_t color, uint8_t brightness) {
       }
     }
   }
-  matrix.show();
-}
+unsigned long lastPatternChangeMs = 0;
 
 void setMatrixPattern(LedPattern pat) {
+  unsigned long now = millis();
+  if (now - lastPatternChangeMs < 2000 && pat != currentPattern && lastPatternChangeMs > 0) {
+    Serial.println("[ACTUATOR] Cooldown: Pattern change rate-limited (2s window).");
+    return;
+  }
+  lastPatternChangeMs = now;
   currentPattern = pat;
   switch (pat) {
     case PAT_NORMAL_CHECK:

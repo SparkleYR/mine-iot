@@ -59,6 +59,7 @@ HEADERS_POST = {
 class CommandPollerDaemon:
     def __init__(self):
         self.running = False
+        self.last_led_change_t = 0.0
         self.mqtt_client = mqtt.Client(client_id="CommandPollerDaemon")
         self.mqtt_client.on_connect = self.on_mqtt_connect
         self.mqtt_client.on_disconnect = self.on_mqtt_disconnect
@@ -173,6 +174,14 @@ class CommandPollerDaemon:
             
         logger.info(f"Processing command: {cmd_id} of type '{cmd_type}' for target '{target}'")
         
+        # Enforce 2.0-second rate-limiting cooldown between LED matrix changes to prevent rapid flashing
+        if cmd_type in ("LED_TEST", "LED_PATTERN", "RAISE_ALARM", "CLEAR_ALARM"):
+            now_t = time.time()
+            elapsed_led = now_t - self.last_led_change_t
+            if elapsed_led < 2.0:
+                time.sleep(2.0 - elapsed_led)
+            self.last_led_change_t = time.time()
+
         # 1. Forward to ESP32 MQTT topic for wireless nodes
         mqtt_payload = {
             "commandId": cmd_id,
