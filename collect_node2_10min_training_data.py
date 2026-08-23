@@ -29,7 +29,7 @@ ML_CSV_PATH = "/home/sparkle/Documents/MINE SIH/mine-iot/node2_10min_ml_training
 DATASET_10MIN_PATH = os.path.join(BRAIN_DIR, "node2_10min_telemetry.jsonl")
 
 # Baseline resting ground vector for Node 2
-IMU_BASELINE = {"ax": 2.83, "ay": -0.201, "az": -7.293}
+IMU_BASELINE = {"ax": 2.835, "ay": -0.227, "az": -7.276}
 
 def wrap180(deg):
     w = deg % 360
