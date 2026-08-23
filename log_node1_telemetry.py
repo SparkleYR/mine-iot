@@ -27,6 +27,7 @@ with open(OUTPUT_JSONL, "a") as f_jsonl, open(OUTPUT_LOG, "a") as f_log:
                        distance_cm, buzzer, mq2_raw, temperature, humidity, received_at
                 FROM sensor_readings
                 WHERE id > ? AND device_id IN ('ESP-NODE-01', 'esp32_sensor_node_1')
+                  AND adxl_ax IS NOT NULL
                 ORDER BY id ASC
             """, (last_seen_id,))
             rows = c.fetchall()
