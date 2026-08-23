@@ -91,6 +91,11 @@ def insert_reading(node_id, payload, received_at):
     
     # Extract other fields
     distance = payload.get('distance_cm')
+    if distance is None:
+        d1 = payload.get('hcsr04_1', {}).get('distance_cm')
+        d2 = payload.get('hcsr04_2', {}).get('distance_cm')
+        distance = d1 if d1 is not None else d2
+
     buzzer = payload.get('buzzer')
     mq2 = payload.get('mq2_raw')
     temp = payload.get('temperature')
