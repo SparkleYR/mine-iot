@@ -213,6 +213,14 @@ bool animFlashState           = false;
 uint8_t pulseBrightness       = 40;
 int pulseDirection            = 2;
 
+// When true, an operator has explicitly selected a test pattern from the dashboard
+// ("Select Test Pattern" -> LED_TEST/LED_PATTERN over esp32/commands). This permanently
+// halts the autonomous local hazard check below -- the matrix will only ever show the
+// operator's selection until an LED_AUTO or CLEAR_ALARM command resumes automatic control.
+// NOTE: this is RAM-only and resets to false on reboot/power-cycle, same as all other
+// runtime actuator state on this board.
+bool manualLedOverride        = false;
+
 unsigned long lastSensorReadTime  = 0;
 unsigned long lastReconnectAttempt = 0;
 
@@ -385,8 +393,16 @@ void loop() {
     bool criticalHazard = (mq2_raw >= LOCAL_GAS_CRITICAL_ADC) ||
                           (activeDist > 0 && activeDist <= LOCAL_DIST_CRITICAL_CM);
 
+    // The matrix update is skipped while a manual test pattern override is active --
+    // otherwise this autonomous check would silently fight/overwrite the operator's
+    // explicit selection on the very next sensor cycle, which is what made the matrix
+    // feel "random" and uncontrollable from the dashboard. The buzzer safety alarm is
+    // intentionally NOT gated by the override: a real gas/proximity hazard must still
+    // be audible even while someone is test-flashing LED patterns from the dashboard.
     if (criticalHazard) {
-      setMatrixPattern(PAT_DANGER_FLASH);
+      if (!manualLedOverride) {
+        setMatrixPattern(PAT_DANGER_FLASH);
+      }
       setBuzzer(true, 3000); // 3-second alarm burst
     }
 
@@ -574,7 +590,18 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
       Serial.println("[COMMAND] Clearing alarm.");
       setBuzzer(false);
       setMatrixPattern(PAT_NORMAL_CHECK);
+      manualLedOverride = false; // Resolving an alarm also resumes automatic matrix control
     }
+    return;
+  }
+
+  // Explicit "Resume Automatic Control" command from the dashboard: clears the manual
+  // test-pattern override so the autonomous local hazard check (and future remote
+  // commands) can drive the matrix again.
+  if (strstr(message, "LED_AUTO") != NULL) {
+    manualLedOverride = false;
+    setMatrixPattern(PAT_NORMAL_CHECK);
+    Serial.println("[COMMAND] Manual override cleared. Resuming automatic matrix control.");
     return;
   }
 
@@ -586,6 +613,10 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   }
 
   if (strstr(message, "LED_TEST") != NULL || strstr(message, "pattern") != NULL) {
+    // An explicit test-pattern selection from the dashboard permanently halts the
+    // autonomous local hazard check in loop() for this node until LED_AUTO/CLEAR_ALARM
+    // resumes automatic control (see the criticalHazard check above).
+    manualLedOverride = true;
     if (strstr(message, "DANGER_FLASH") != NULL) {
       setMatrixPattern(PAT_DANGER_FLASH);
     } else if (strstr(message, "WARNING_PULSE") != NULL) {
