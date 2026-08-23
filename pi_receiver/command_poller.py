@@ -175,7 +175,7 @@ class CommandPollerDaemon:
         logger.info(f"Processing command: {cmd_id} of type '{cmd_type}' for target '{target}'")
         
         # Enforce 2.0-second rate-limiting cooldown between LED matrix changes to prevent rapid flashing
-        if cmd_type in ("LED_TEST", "LED_PATTERN", "RAISE_ALARM", "CLEAR_ALARM"):
+        if cmd_type in ("LED_TEST", "LED_PATTERN", "LED_AUTO", "RAISE_ALARM", "CLEAR_ALARM"):
             now_t = time.time()
             elapsed_led = now_t - self.last_led_change_t
             if elapsed_led < 2.0:
@@ -203,6 +203,11 @@ class CommandPollerDaemon:
             elif cmd_type in ("LED_TEST", "LED_PATTERN"):
                 pattern = payload.get("pattern", "NORMAL_CHECK")
                 self.actuators.set_pattern(pattern)
+            elif cmd_type == "LED_AUTO":
+                # Dashboard "Resume Automatic Control": drop back to the idle/nominal
+                # pattern on the Pi-attached matrix, mirroring the ESP32 firmware's
+                # LED_AUTO handling.
+                self.actuators.set_pattern("NORMAL_CHECK")
             elif cmd_type == "RAISE_ALARM":
                 self.trigger_alarm(True)
                 alarm_payload = {"action": "RAISE", "severity": "CRITICAL"}

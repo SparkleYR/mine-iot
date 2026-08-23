@@ -274,9 +274,14 @@ void setup() {
 #if HAS_ACTUATORS
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+  ledcAttach(BUZZER_PIN, BUZZER_PWM_FREQ, BUZZER_PWM_RES);
+  ledcWrite(BUZZER_PIN, 0); // Buzzer silent initially
+#else
   ledcSetup(BUZZER_PWM_CHANNEL, BUZZER_PWM_FREQ, BUZZER_PWM_RES);
   ledcAttachPin(BUZZER_PIN, BUZZER_PWM_CHANNEL);
   ledcWrite(BUZZER_PWM_CHANNEL, 0); // Buzzer silent initially
+#endif
 
   matrix.begin();
   matrix.setBrightness(40);
@@ -478,6 +483,9 @@ void renderBitmap(const uint8_t bitmap[8], uint32_t color, uint8_t brightness) {
       }
     }
   }
+  matrix.show();
+}
+
 unsigned long lastPatternChangeMs = 0;
 
 void setMatrixPattern(LedPattern pat) {
@@ -511,14 +519,22 @@ void setMatrixPattern(LedPattern pat) {
 void setBuzzer(bool active, unsigned long durationMs) {
   buzzerActive = active;
   if (active) {
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+    ledcWrite(BUZZER_PIN, 128); // 50% duty cycle 2.8 kHz tone
+#else
     ledcWrite(BUZZER_PWM_CHANNEL, 128); // 50% duty cycle 2.8 kHz tone
+#endif
     if (durationMs > 0) {
       buzzerAutoOffAt = millis() + durationMs;
     } else {
       buzzerAutoOffAt = 0; // Continuous until explicit clear
     }
   } else {
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+    ledcWrite(BUZZER_PIN, 0);   // Silence buzzer
+#else
     ledcWrite(BUZZER_PWM_CHANNEL, 0);   // Silence buzzer
+#endif
     buzzerAutoOffAt = 0;
   }
 }
