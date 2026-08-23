@@ -29,7 +29,7 @@ from datetime import datetime
 # ==========================================
 MQTT_BROKER = "localhost"
 MQTT_PORT = 1883
-MQTT_TOPICS = ["esp32/sensor_data", "esp32/+", "mine/telemetry", "mine/+"]
+MQTT_TOPICS = ["esp32/sensor_data", "mine/telemetry"]
 DB_FILE = os.path.expanduser("~/mine-iot/pi_receiver/sensor_data.db")
 LOG_FILE = os.path.expanduser("~/mine-iot/pi_receiver/forwarder.log")
 
@@ -196,6 +196,13 @@ def forward_batch(readings: list):
 # ==========================================
 def normalize_and_forward(raw_data: dict, source="MQTT"):
     global last_physical_packet_time
+
+    # Ignore command or alarm message payloads mistakenly sent on MQTT
+    if "commandId" in raw_data or "action" in raw_data or "issuedBy" in raw_data:
+        return
+    if "adxl345" not in raw_data and "mpu6050" not in raw_data and "gy87_mpu" not in raw_data and "seq" not in raw_data:
+        return
+
     now_iso = datetime.utcnow().isoformat() + "Z"
     
     dev = raw_data.get("dev") or raw_data.get("nodeId") or "ESP-NODE-01"

@@ -93,6 +93,13 @@ def init_db():
 
 def insert_reading(node_id, payload, received_at):
     """Insert a single reading into the SQLite database."""
+    if not isinstance(payload, dict):
+        return
+    if 'commandId' in payload or 'action' in payload or 'issuedBy' in payload:
+        return
+    if 'adxl345' not in payload and 'mpu6050' not in payload and 'gy87_mpu' not in payload and 'seq' not in payload:
+        return
+
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
