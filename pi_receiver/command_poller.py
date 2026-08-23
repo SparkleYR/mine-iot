@@ -112,15 +112,22 @@ class CommandPollerDaemon:
             self.actuators.set_pattern("NORMAL_CHECK")
 
     def fetch_pending_commands(self):
-        urls_to_try = [API_URL_LOCAL, API_URL_NGROK]
+        urls_to_try = [API_URL_NGROK, API_URL_LOCAL]
+        results = []
+        seen_ids = set()
         
         for url in urls_to_try:
             req = urllib.request.Request(url, headers=HEADERS_GET)
             try:
-                with urllib.request.urlopen(req, timeout=3) as response:
+                with urllib.request.urlopen(req, timeout=4) as response:
                     if response.status == 200:
                         data = json.loads(response.read().decode('utf-8'))
-                        return url, data.get("data", [])
+                        cmds = data.get("data", [])
+                        for c in cmds:
+                            cid = c.get("id") or c.get("commandId")
+                            if cid and cid not in seen_ids:
+                                seen_ids.add(cid)
+                                results.append((url, c))
             except urllib.error.URLError as e:
                 logger.debug(f"Failed to fetch from {url}: {e}")
             except json.JSONDecodeError as e:
@@ -128,10 +135,10 @@ class CommandPollerDaemon:
             except Exception as e:
                 logger.error(f"Unexpected error fetching from {url}: {e}")
         
-        return None, []
+        return results
         
     def ack_command(self, base_url, cmd_id):
-        is_ngrok = "ngrok" in base_url
+        is_ngrok = "sslip.io" in base_url or "ngrok" in base_url
         ack_tmpl = API_ACK_NGROK_TMPL if is_ngrok else API_ACK_LOCAL_TMPL
         ack_url = ack_tmpl.format(id=cmd_id)
         
@@ -212,14 +219,16 @@ class CommandPollerDaemon:
         while self.running:
             start_time = time.time()
             try:
-                successful_url, commands = self.fetch_pending_commands()
-                if successful_url and commands:
-                    logger.info(f"Fetched {len(commands)} pending command(s) from {successful_url}")
-                    for cmd in commands:
+                pending_commands = self.fetch_pending_commands()
+                if pending_commands:
+                    logger.info(f"Fetched {len(pending_commands)} total pending command(s)")
+                    for source_url, cmd in pending_commands:
                         self.process_command(cmd)
                         cmd_id = cmd.get("id") or cmd.get("commandId")
                         if cmd_id:
-                            self.ack_command(successful_url, cmd_id)
+                            self.ack_command(source_url, cmd_id)
+            except Exception as e:
+                logger.error(f"Error in poll loop: {e}")
             except Exception as e:
                 logger.error(f"Error in poll loop: {e}")
                 
