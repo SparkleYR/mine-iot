@@ -122,22 +122,14 @@ def on_message(client, userdata, msg):
         adxl_data = payload.get("adxl345", {})
         mpu_data = payload.get("mpu6050", {})
         distance_cm = payload.get("distance_cm")
-        if distance_cm is None:
-            d1 = payload.get("hcsr04_1", {}).get("distance_cm")
-            d2 = payload.get("hcsr04_2", {}).get("distance_cm")
-            distance_cm = d1 if d1 is not None else d2
-
         buzzer = payload.get("buzzer", 0)
         mq2_raw = payload.get("mq2_raw", 0)
         temperature = payload.get("temperature")
         humidity = payload.get("humidity")
         
-        if None in (seq, device_ms, vib):
+        if None in (seq, device_ms, vib, distance_cm):
             print(f"Warning: Received incomplete payload: {payload}", file=sys.stderr)
             return
-
-        if distance_cm is None:
-            distance_cm = -1.0
             
         # Save to database
         save_reading(dev, seq, device_ms, vib, adxl_data, mpu_data, distance_cm, buzzer, mq2_raw, temperature, humidity)

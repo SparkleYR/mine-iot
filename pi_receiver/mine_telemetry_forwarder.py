@@ -218,22 +218,22 @@ def normalize_and_forward(raw_data: dict, source="MQTT"):
     if "ms" not in payload:
         payload["ms"] = int(time.time() * 1000) % 10000000
 
+    # Parse unified distance_cm from dual HC-SR04 sensors (take minimum valid distance)
+    dist = payload.get("distance_cm")
+    if dist is None:
+        h1 = payload.get("hcsr04_1") or {}
+        h2 = payload.get("hcsr04_2") or {}
+        d1 = h1.get("distance_cm") if isinstance(h1, dict) else payload.get("distance_cm_1")
+        d2 = h2.get("distance_cm") if isinstance(h2, dict) else payload.get("distance_cm_2")
+        
+        valid_dists = [d for d in (d1, d2) if d is not None and d > 0]
+        dist = min(valid_dists) if valid_dists else 40.0
+    
+    payload["distance_cm"] = dist
+
     # Save to SQLite
     adxl = payload.get("adxl345") or payload.get("gy87_mpu") or {}
     mpu = payload.get("mpu6050") or {}
-    
-    dist = payload.get("distance_cm")
-    if dist is None:
-        d1 = payload.get("hcsr04_1", {}).get("distance_cm")
-        d2 = payload.get("hcsr04_2", {}).get("distance_cm")
-        dist = d1 if d1 is not None else d2
-        # Ensure it is set in payload for remote cloud backend
-        if dist is not None:
-            payload["distance_cm"] = dist
-    
-    if dist is None:
-        dist = 40.0
-
     save_to_db(
         dev=node_id,
         seq=payload.get("seq", 0),

@@ -8,18 +8,35 @@
 #include <vector>
 
 // ==========================================
-// CONFIGURATION
+// NODE IDENTITY SELECTOR
+// ==========================================
+// Set NODE_IDENTITY to:
+//   1 -> Configures node as esp32_sensor_node_1 (ESP-NODE-01)
+//   2 -> Configures node as esp32_sensor_node_2 (ESP-NODE-02)
+#define NODE_IDENTITY 1
+
+#if NODE_IDENTITY == 1
+  const char* mqtt_client_id = "esp32_sensor_node_1";
+  const char* wifi_hostname  = "esp32-sensor-node-1";
+#elif NODE_IDENTITY == 2
+  const char* mqtt_client_id = "esp32_sensor_node_2";
+  const char* wifi_hostname  = "esp32-sensor-node-2";
+#else
+  #error "Invalid NODE_IDENTITY. Choose 1 or 2."
+#endif
+
+// ==========================================
+// WIFI & MQTT CONFIGURATION
 // ==========================================
 
 // Wi-Fi
 const char* ssid     = "Pi4B-Hotspot";
 const char* password = "abcdefgh";
 
-// MQTT
+// MQTT Broker
 const char* mqtt_server    = "10.42.0.1";
 const int   mqtt_port      = 1883;
 const char* mqtt_topic     = "esp32/sensor_data";
-const char* mqtt_client_id = "esp32_sensor_node_2";
 
 // ==========================================
 // PIN CONFIGURATION
@@ -32,12 +49,13 @@ const int SW420_PIN = 13;
 const int SDA_PIN = 21;
 const int SCL_PIN = 22;
 
-// HC-SR04
-const int HCSR04_TRIG_PIN = 25;
-const int HCSR04_ECHO_PIN = 26;
+// HC-SR04 Ultrasonic Sensor #1
+const int HCSR04_1_TRIG_PIN = 25;
+const int HCSR04_1_ECHO_PIN = 26;
 
-// Buzzer
-const int BUZZER_PIN = 27;
+// HC-SR04 Ultrasonic Sensor #2
+const int HCSR04_2_TRIG_PIN = 32;
+const int HCSR04_2_ECHO_PIN = 35;
 
 // MQ-2 analog output
 const int MQ2_PIN = 34;
@@ -62,7 +80,6 @@ const uint8_t MPU6050_ADDRESS = 0x69;
 // SENSOR SETTINGS
 // ==========================================
 
-const float BUZZER_DISTANCE_THRESHOLD = 50.0;
 const unsigned long SENSOR_INTERVAL = 5000;
 const unsigned long RECONNECT_INTERVAL = 10000;
 
@@ -90,11 +107,11 @@ struct DataPoint {
   float mpu_gy;
   float mpu_gz;
 
-  // HC-SR04
-  float distance_cm;
+  // HC-SR04 #1
+  float distance_cm_1;
 
-  // Buzzer
-  int buzzer;
+  // HC-SR04 #2
+  float distance_cm_2;
 
   // MQ-2
   int mq2_raw;
@@ -148,13 +165,14 @@ unsigned long lastReconnectAttempt = 0;
 
 void setupWiFi();
 void connectToMQTT();
-float readDistance();
+float readDistance(int trigPin, int echoPin);
 void readSensors(
   int &vib,
   float &adxl_ax, float &adxl_ay, float &adxl_az,
   float &mpu_ax, float &mpu_ay, float &mpu_az,
   float &mpu_gx, float &mpu_gy, float &mpu_gz,
-  float &distance,
+  float &distance1,
+  float &distance2,
   int &mq2_raw,
   float &temperature,
   float &humidity
@@ -180,8 +198,8 @@ void setup() {
 
   Serial.println();
   Serial.println("==================================================");
-  Serial.println(" ESP32 SENSOR NODE");
-  Serial.println(" ADXL345 + MPU6050 + SW-420 + HC-SR04");
+  Serial.printf(" ESP32 SENSOR NODE (IDENTITY: %s)\n", mqtt_client_id);
+  Serial.println(" ADXL345 + MPU6050 + SW-420 + 2x HC-SR04");
   Serial.println(" MQ-2 + DHT11");
   Serial.println("==================================================");
 
@@ -194,16 +212,17 @@ void setup() {
   );
   Serial.printf("[SW420] Interrupt attached to GPIO %d\n", SW420_PIN);
 
-  // HC-SR04
-  pinMode(HCSR04_TRIG_PIN, OUTPUT);
-  pinMode(HCSR04_ECHO_PIN, INPUT);
-  digitalWrite(HCSR04_TRIG_PIN, LOW);
-  Serial.printf("[HCSR04] TRIG = GPIO %d | ECHO = GPIO %d\n", HCSR04_TRIG_PIN, HCSR04_ECHO_PIN);
+  // HC-SR04 #1
+  pinMode(HCSR04_1_TRIG_PIN, OUTPUT);
+  pinMode(HCSR04_1_ECHO_PIN, INPUT);
+  digitalWrite(HCSR04_1_TRIG_PIN, LOW);
+  Serial.printf("[HCSR04_1] TRIG = GPIO %d | ECHO = GPIO %d\n", HCSR04_1_TRIG_PIN, HCSR04_1_ECHO_PIN);
 
-  // Buzzer
-  pinMode(BUZZER_PIN, OUTPUT);
-  digitalWrite(BUZZER_PIN, LOW);
-  Serial.printf("[BUZZER] Output on GPIO %d\n", BUZZER_PIN);
+  // HC-SR04 #2
+  pinMode(HCSR04_2_TRIG_PIN, OUTPUT);
+  pinMode(HCSR04_2_ECHO_PIN, INPUT);
+  digitalWrite(HCSR04_2_TRIG_PIN, LOW);
+  Serial.printf("[HCSR04_2] TRIG = GPIO %d | ECHO = GPIO %d\n", HCSR04_2_TRIG_PIN, HCSR04_2_ECHO_PIN);
 
   // MQ-2
   pinMode(MQ2_PIN, INPUT);
@@ -272,7 +291,8 @@ void loop() {
     float adxl_ax = 0.0, adxl_ay = 0.0, adxl_az = 0.0;
     float mpu_ax = 0.0, mpu_ay = 0.0, mpu_az = 0.0;
     float mpu_gx = 0.0, mpu_gy = 0.0, mpu_gz = 0.0;
-    float distance = -1.0;
+    float distance1 = -1.0;
+    float distance2 = -1.0;
     int mq2_raw = 0;
     float temperature = NAN;
     float humidity = NAN;
@@ -282,15 +302,12 @@ void loop() {
       adxl_ax, adxl_ay, adxl_az,
       mpu_ax, mpu_ay, mpu_az,
       mpu_gx, mpu_gy, mpu_gz,
-      distance,
+      distance1,
+      distance2,
       mq2_raw,
       temperature,
       humidity
     );
-
-    // Buzzer logic
-    bool buzzerActive = (distance > 0 && distance < BUZZER_DISTANCE_THRESHOLD);
-    digitalWrite(BUZZER_PIN, buzzerActive ? HIGH : LOW);
 
     // Create data point
     sequenceNumber++;
@@ -301,8 +318,8 @@ void loop() {
       adxl_ax, adxl_ay, adxl_az,
       mpu_ax, mpu_ay, mpu_az,
       mpu_gx, mpu_gy, mpu_gz,
-      distance,
-      buzzerActive ? 1 : 0,
+      distance1,
+      distance2,
       mq2_raw,
       temperature,
       humidity
@@ -317,14 +334,14 @@ void loop() {
 
     // Serial output
     Serial.printf(
-      "[SENSOR] #%lu | Vib=%d | ADXL345 A=[%.2f, %.2f, %.2f] | MPU6050 A=[%.2f, %.2f, %.2f] G=[%.2f, %.2f, %.2f] | Dist=%.2f cm | Buzzer=%d | MQ2=%d | Temp=%.2f C | Humidity=%.2f %% | Buffer=%d/%d\n",
+      "[SENSOR] #%lu | Vib=%d | ADXL345 A=[%.2f, %.2f, %.2f] | MPU6050 A=[%.2f, %.2f, %.2f] G=[%.2f, %.2f, %.2f] | Dist1=%.2f cm | Dist2=%.2f cm | MQ2=%d | Temp=%.2f C | Humidity=%.2f %% | Buffer=%d/%d\n",
       (unsigned long)dp.seq,
       dp.vibration,
       dp.adxl_ax, dp.adxl_ay, dp.adxl_az,
       dp.mpu_ax, dp.mpu_ay, dp.mpu_az,
       dp.mpu_gx, dp.mpu_gy, dp.mpu_gz,
-      dp.distance_cm,
-      dp.buzzer,
+      dp.distance_cm_1,
+      dp.distance_cm_2,
       dp.mq2_raw,
       dp.temperature,
       dp.humidity,
@@ -359,14 +376,14 @@ void loop() {
 
 void setupWiFi() {
   Serial.printf("[WIFI] Connecting to %s ...\n", ssid);
-  
+
   // Clean up any existing connection state and force STA mode
   WiFi.disconnect(true);
   delay(200);
   WiFi.mode(WIFI_STA);
   delay(200);
 
-  WiFi.setHostname("esp32-sensor-node-2");
+  WiFi.setHostname(wifi_hostname);
   WiFi.begin(ssid, password);
 
   int attempts = 0;
@@ -391,7 +408,7 @@ void setupWiFi() {
 // ==========================================
 
 void connectToMQTT() {
-  Serial.print("[MQTT] Connecting to broker... ");
+  Serial.printf("[MQTT] Connecting to broker as '%s'... ", mqtt_client_id);
   if (mqttClient.connect(mqtt_client_id)) {
     Serial.println("Connected!");
   } else {
@@ -408,7 +425,8 @@ void readSensors(
   float &adxl_ax, float &adxl_ay, float &adxl_az,
   float &mpu_ax, float &mpu_ay, float &mpu_az,
   float &mpu_gx, float &mpu_gy, float &mpu_gz,
-  float &distance,
+  float &distance1,
+  float &distance2,
   int &mq2_raw,
   float &temperature,
   float &humidity
@@ -449,8 +467,10 @@ void readSensors(
     Serial.println("[ERROR] MPU6050 is not initialized.");
   }
 
-  // HC-SR04
-  distance = readDistance();
+  // HC-SR04 #1 and #2
+  distance1 = readDistance(HCSR04_1_TRIG_PIN, HCSR04_1_ECHO_PIN);
+  delay(15); // Wait for pulse to dissipate before firing second sensor to avoid interference
+  distance2 = readDistance(HCSR04_2_TRIG_PIN, HCSR04_2_ECHO_PIN);
 
   // MQ-2
   mq2_raw = analogRead(MQ2_PIN);
@@ -471,21 +491,21 @@ void readSensors(
 // HC-SR04
 // ==========================================
 
-float readDistance() {
-  digitalWrite(HCSR04_TRIG_PIN, LOW);
+float readDistance(int trigPin, int echoPin) {
+  digitalWrite(trigPin, LOW);
   delayMicroseconds(2);
-  digitalWrite(HCSR04_TRIG_PIN, HIGH);
+  digitalWrite(trigPin, HIGH);
   delayMicroseconds(10);
-  digitalWrite(HCSR04_TRIG_PIN, LOW);
+  digitalWrite(trigPin, LOW);
 
   unsigned long duration = pulseInLong(
-    HCSR04_ECHO_PIN,
+    echoPin,
     HIGH,
     30000
   );
 
   if (duration == 0) {
-    Serial.println("[HCSR04] No echo received!");
+    Serial.printf("[HCSR04] No echo received on ECHO pin %d!\n", echoPin);
     return -1.0;
   }
 
@@ -498,8 +518,20 @@ float readDistance() {
 // ==========================================
 
 bool publishDataPoint(const DataPoint &dp) {
-  char payload[800];
+  char payload[950];
   bool validDHT = !isnan(dp.temperature) && !isnan(dp.humidity);
+
+  // Compute unified top-level distance
+  float unified_dist = -1.0;
+  if (dp.distance_cm_1 > 0 && dp.distance_cm_2 > 0) {
+    unified_dist = min(dp.distance_cm_1, dp.distance_cm_2);
+  } else if (dp.distance_cm_1 > 0) {
+    unified_dist = dp.distance_cm_1;
+  } else if (dp.distance_cm_2 > 0) {
+    unified_dist = dp.distance_cm_2;
+  } else {
+    unified_dist = 40.0;
+  }
 
   if (validDHT) {
     snprintf(
@@ -523,8 +555,13 @@ bool publishDataPoint(const DataPoint &dp) {
           "\"gy\":%.3f,"
           "\"gz\":%.3f"
         "},"
+        "\"hcsr04_1\":{"
+          "\"distance_cm\":%.2f"
+        "},"
+        "\"hcsr04_2\":{"
+          "\"distance_cm\":%.2f"
+        "},"
         "\"distance_cm\":%.2f,"
-        "\"buzzer\":%d,"
         "\"mq2_raw\":%d,"
         "\"temperature\":%.2f,"
         "\"humidity\":%.2f"
@@ -536,8 +573,9 @@ bool publishDataPoint(const DataPoint &dp) {
       dp.adxl_ax, dp.adxl_ay, dp.adxl_az,
       dp.mpu_ax, dp.mpu_ay, dp.mpu_az,
       dp.mpu_gx, dp.mpu_gy, dp.mpu_gz,
-      dp.distance_cm,
-      dp.buzzer,
+      dp.distance_cm_1,
+      dp.distance_cm_2,
+      unified_dist,
       dp.mq2_raw,
       dp.temperature,
       dp.humidity
@@ -564,8 +602,13 @@ bool publishDataPoint(const DataPoint &dp) {
           "\"gy\":%.3f,"
           "\"gz\":%.3f"
         "},"
+        "\"hcsr04_1\":{"
+          "\"distance_cm\":%.2f"
+        "},"
+        "\"hcsr04_2\":{"
+          "\"distance_cm\":%.2f"
+        "},"
         "\"distance_cm\":%.2f,"
-        "\"buzzer\":%d,"
         "\"mq2_raw\":%d,"
         "\"temperature\":null,"
         "\"humidity\":null"
@@ -577,8 +620,9 @@ bool publishDataPoint(const DataPoint &dp) {
       dp.adxl_ax, dp.adxl_ay, dp.adxl_az,
       dp.mpu_ax, dp.mpu_ay, dp.mpu_az,
       dp.mpu_gx, dp.mpu_gy, dp.mpu_gz,
-      dp.distance_cm,
-      dp.buzzer,
+      dp.distance_cm_1,
+      dp.distance_cm_2,
+      unified_dist,
       dp.mq2_raw
     );
   }
