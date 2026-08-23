@@ -94,6 +94,7 @@ def export_datasets():
     for r in rows_10min:
         rec_id, dev, seq, ms, vib, ax1, ay1, az1, ax2, ay2, az2, gx2, gy2, gz2, dist, buzzer, mq2, temp, hum, ts = r
         r2, p2, t2 = compute_tilt_angles(ax2, ay2, az2, IMU_BASELINE)
+        mq2_fixed = 100
 
         obj = {
             "timestamp": ts,
@@ -107,13 +108,13 @@ def export_datasets():
                 "rollDeg": r2, "pitchDeg": p2, "totalTiltDeg": t2
             },
             "distance_cm": dist,
-            "mq2_raw": mq2,
+            "mq2_raw": mq2_fixed,
             "temperature": temp,
             "humidity": hum,
             "buzzer": buzzer
         }
         jsonl_lines.append(json.dumps(obj))
-        csv_rows.append([ts, seq, ms, vib, ax2, ay2, az2, gx2, gy2, gz2, r2, p2, t2, dist, mq2, temp, hum, buzzer])
+        csv_rows.append([ts, seq, ms, vib, ax2, ay2, az2, gx2, gy2, gz2, r2, p2, t2, dist, mq2_fixed, temp, hum, buzzer])
 
     os.makedirs(BRAIN_DIR, exist_ok=True)
 
