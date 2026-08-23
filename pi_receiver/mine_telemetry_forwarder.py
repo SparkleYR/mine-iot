@@ -62,7 +62,7 @@ NODE_MAPPING = {
         "nodeId": "ESP-NODE-02",
         "nodeLabel": "Chamber 2 — Central Extraction Header",
         "location": "Header Section 4B",
-        "nodeType": "gy87_mpu6050_vib_hcsr04_dht11"
+        "nodeType": "adxl345_mpu6050_vib_hcsr04_mq2_dht11"
     },
     "ESP-NODE-01": {
         "nodeId": "ESP-NODE-01",
@@ -74,7 +74,7 @@ NODE_MAPPING = {
         "nodeId": "ESP-NODE-02",
         "nodeLabel": "Chamber 2 — Central Extraction Header",
         "location": "Header Section 4B",
-        "nodeType": "gy87_mpu6050_vib_hcsr04_dht11"
+        "nodeType": "adxl345_mpu6050_vib_hcsr04_mq2_dht11"
     }
 }
 
