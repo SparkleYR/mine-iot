@@ -208,6 +208,24 @@ def sync_cloud_commands_loop():
             logger.debug(f"Cloud command sync check: {e}")
         time.sleep(2.0)
 
+def forward_telemetry_to_cloud(body_bytes: bytes):
+    """Relays Pi 4 telemetry payload to Cloud Backend."""
+    def _task():
+        url = f"{CLOUD_BASE}/api/v1/telemetry/ingest"
+        req = urllib.request.Request(url, data=body_bytes, headers={
+            "Content-Type": "application/json",
+            "ngrok-skip-browser-warning": "1",
+            "User-Agent": "EdgeLaptop-Relay/1.0"
+        }, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=4) as res:
+                if res.status in (200, 201):
+                    logger.debug(f"[CLOUD RELAY] Relayed telemetry batch to Cloud Backend.")
+        except Exception as e:
+            logger.debug(f"Could not relay telemetry to cloud: {e}")
+
+    threading.Thread(target=_task, daemon=True).start()
+
 class RequestHandler(BaseHTTPRequestHandler):
     def _send_cors_headers(self):
         self.send_header('Access-Control-Allow-Origin', '*')
@@ -286,7 +304,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                     logger.error(f"Error inserting reading for {node_id}: {e}")
                     results.append({"nodeId": node_id, "status": "ERROR"})
                     
-            logger.info(f"Ingested {len(results)} readings from Pi 4")
+            forward_telemetry_to_cloud(post_data)
+            logger.info(f"Ingested {len(results)} readings from Pi 4 & relayed to Cloud")
             self._send_response(200, {"ok": True, "results": results})
 
         # 2. Command Creation (Remote / Dashboard / Webhook)
