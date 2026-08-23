@@ -17,7 +17,7 @@ LOG_FILE = os.path.join(BASE_DIR, 'image_server.log')
 
 # Endpoints
 PC_UPLOAD_URL = "http://192.168.1.1:5000/upload"
-API_URL_NGROK = "https://commute-overrule-employer.ngrok-free.dev/api/v1/photos"
+API_URL_NGROK = "https://35-154-233-23.sslip.io/api/v1/photos"
 API_URL_LOCAL = "http://192.168.1.1:4000/api/v1/photos"
 
 # Ensure directories exist

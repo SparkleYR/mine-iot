@@ -34,7 +34,7 @@ logger = logging.getLogger("PCLocalReceiver")
 HOST = '0.0.0.0'
 PORT = 4000
 DB_PATH = os.path.expanduser('~/mine-iot/pc_telemetry.db')
-CLOUD_BASE = "https://commute-overrule-employer.ngrok-free.dev"
+CLOUD_BASE = "https://35-154-233-23.sslip.io"
 
 # In-Memory Command Queue
 command_lock = threading.Lock()

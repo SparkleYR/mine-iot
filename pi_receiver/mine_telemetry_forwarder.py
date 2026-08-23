@@ -33,7 +33,7 @@ MQTT_TOPICS = ["esp32/sensor_data", "esp32/+", "mine/telemetry", "mine/+"]
 DB_FILE = os.path.expanduser("~/mine-iot/pi_receiver/sensor_data.db")
 LOG_FILE = os.path.expanduser("~/mine-iot/pi_receiver/forwarder.log")
 
-CLOUD_INGEST_URL = "https://commute-overrule-employer.ngrok-free.dev/api/v1/telemetry/ingest"
+CLOUD_INGEST_URL = "https://35-154-233-23.sslip.io/api/v1/telemetry/ingest"
 LOCAL_INGEST_URLS = [
     "http://192.168.1.1:4000/api/v1/telemetry/ingest",
     "http://127.0.0.1:4000/api/v1/telemetry/ingest"

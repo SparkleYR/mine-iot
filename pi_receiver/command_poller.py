@@ -31,9 +31,9 @@ logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, handlers=[
 ])
 logger = logging.getLogger("CommandPoller")
 
-API_URL_NGROK = "https://commute-overrule-employer.ngrok-free.dev/api/v1/commands/pending"
+API_URL_NGROK = "https://35-154-233-23.sslip.io/api/v1/commands/pending"
 API_URL_LOCAL = "http://192.168.1.1:4000/api/v1/commands/pending"
-API_ACK_NGROK_TMPL = "https://commute-overrule-employer.ngrok-free.dev/api/v1/commands/{id}/ack"
+API_ACK_NGROK_TMPL = "https://35-154-233-23.sslip.io/api/v1/commands/{id}/ack"
 API_ACK_LOCAL_TMPL = "http://192.168.1.1:4000/api/v1/commands/{id}/ack"
 
 MQTT_HOST = "localhost"

@@ -152,7 +152,7 @@ else
 fi
 
 # Check Remote Cloud API Endpoint
-CLOUD_HEALTH=$(curl -s -H "ngrok-skip-browser-warning: 1" https://commute-overrule-employer.ngrok-free.dev/health || echo "FAIL")
+CLOUD_HEALTH=$(curl -s -H "ngrok-skip-browser-warning: 1" https://35-154-233-23.sslip.io/api/v1/health || echo "FAIL")
 if [[ "$CLOUD_HEALTH" == *"mine-backend"* ]]; then
     echo -e "  ${GREEN}✔ Cloud Backend API (ngrok): HEALTHY${NC}"
 else
